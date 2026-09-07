@@ -112,6 +112,28 @@ describe("skipRecord", () => {
     expect(next!.status).toBe("pending");
     expect(next!.id).not.toBe(first!.id);
   });
+
+  it("rotates through the entire skipped pool once pending records run out, instead of bouncing between just the first couple", async () => {
+    await createFileWithRecords(4);
+    const user = await createUser("user1");
+
+    const seen: string[] = [];
+    let current = await claimNextRecordForUser(user.id);
+    for (let i = 0; i < 8; i++) {
+      seen.push(current!.id);
+      await skipRecord(current!.id, user.id);
+      current = await claimNextRecordForUser(user.id, { excludeRecordId: current!.id });
+    }
+
+    // The first 4 skips exhaust the pending pool — one distinct record each.
+    expect(new Set(seen.slice(0, 4)).size).toBe(4);
+
+    // Once only skipped records remain, the next 4 claims should cycle
+    // through those same 4 records again (oldest-skipped-first), not
+    // ping-pong between a smaller subset of them.
+    expect(new Set(seen.slice(4, 8)).size).toBe(4);
+    expect(seen.slice(4, 8)).toEqual(seen.slice(0, 4));
+  });
 });
 
 describe("completeRecord", () => {

@@ -64,6 +64,14 @@ async function releaseStaleClaims(): Promise<void> {
  * over previously-`skipped` ones, so a user working through the queue makes
  * forward progress instead of immediately cycling back to what they just
  * skipped. Falls back to skipped records once pending ones run out.
+ *
+ * The skipped fallback orders by `updatedAt` (oldest-skipped-first), not by
+ * file/row position — with a fixed row-position order, once every row is
+ * skipped, the single most-recently-excluded id isn't enough to stop
+ * candidate selection from bouncing back and forth between just the lowest
+ * one or two row positions forever. Oldest-skipped-first instead rotates
+ * through the entire skipped pool in FIFO order, so every skipped row is
+ * eventually reachable again.
  */
 async function findCandidate(excludeIds: string[]) {
   const notIn = excludeIds.length ? { notIn: excludeIds } : undefined;
@@ -75,7 +83,7 @@ async function findCandidate(excludeIds: string[]) {
 
   return prisma.record.findFirst({
     where: { status: "skipped", claimedById: null, ...(notIn ? { id: notIn } : {}) },
-    orderBy: [{ sourceFileId: "asc" }, { rowIndex: "asc" }],
+    orderBy: [{ updatedAt: "asc" }, { rowIndex: "asc" }],
   });
 }
 

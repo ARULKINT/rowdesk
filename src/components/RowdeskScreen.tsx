@@ -66,9 +66,11 @@ export default function RowdeskScreen({
   const [doneToday, setDoneToday] = useState(initialDoneToday);
   const [toast, setToast] = useState<React.ReactNode>(null);
   const [copyMsg, setCopyMsg] = useState("");
+  const [phoneCopied, setPhoneCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const phoneCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const domain = useMemo(() => extractDomain(record?.websiteUrl ?? null), [record]);
   const composeValues = useMemo(
@@ -91,13 +93,17 @@ export default function RowdeskScreen({
     setRecord((prev) => (prev ? { ...prev, ...patch } : prev));
   }
 
-  function handleToggleCalled() {
-    if (!record) return;
-    const next = !record.called;
-    updateRecord({ called: next });
-    patchRecord(record.id, { called: next }).catch(() =>
-      showToast("Couldn't save — try again")
-    );
+  async function handleCopyPhone() {
+    if (!record?.phone) return;
+    try {
+      await navigator.clipboard.writeText(record.phone);
+      setPhoneCopied(true);
+    } catch {
+      showToast("Couldn't copy — select & Ctrl+C");
+      return;
+    }
+    if (phoneCopyTimer.current) clearTimeout(phoneCopyTimer.current);
+    phoneCopyTimer.current = setTimeout(() => setPhoneCopied(false), 2000);
   }
 
   function handleToggleVerified() {
@@ -289,10 +295,11 @@ export default function RowdeskScreen({
               <button
                 type="button"
                 className={styles.chipBtn}
-                data-on={String(record.called)}
-                onClick={handleToggleCalled}
+                data-on={String(phoneCopied)}
+                onClick={handleCopyPhone}
+                disabled={!record.phone}
               >
-                {record.called ? "Called ✓" : "Called"}
+                {phoneCopied ? "Copied ✓" : "Copy"}
               </button>
             </div>
           </div>
@@ -394,8 +401,8 @@ export default function RowdeskScreen({
       </div>
 
       <footer className={styles.note}>
-        Called, Verified and Done states persist as you move through the queue. Records lock to
-        you the moment they’re claimed.
+        Verified and Done states persist as you move through the queue. Records lock to you the
+        moment they’re claimed.
       </footer>
     </div>
   );
