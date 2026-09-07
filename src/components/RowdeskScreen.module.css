@@ -330,6 +330,7 @@
   line-height: 1.6;
   margin: 0 0 14px;
   text-wrap: pretty;
+  white-space: pre-wrap;
 }
 
 .composerText mark {

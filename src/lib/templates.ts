@@ -4,17 +4,34 @@ export const STARTER_TEMPLATES: string[] = [
   "Local domains near {domain} are being registered faster than ever this quarter. Locking in the variants next to {domain} now keeps your listing, and your customers, pointed at the real thing.",
 ];
 
-export function composeMessage(template: string, domain: string): string {
-  return template.split("{domain}").join(domain || "your-domain.com");
+export interface ComposeValues {
+  domain?: string;
+  name?: string;
 }
 
-export function composeMessageHtml(template: string, domain: string): string {
-  const value = domain || "your-domain.com";
-  const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return template
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .split("{domain}")
-    .join(`<mark>${escaped}</mark>`);
+const FALLBACKS: Record<keyof ComposeValues, string> = {
+  domain: "your-domain.com",
+  name: "your business",
+};
+
+export function composeMessage(template: string, values: ComposeValues): string {
+  let result = template;
+  for (const key of Object.keys(FALLBACKS) as (keyof ComposeValues)[]) {
+    const value = values[key] || FALLBACKS[key];
+    result = result.split(`{${key}}`).join(value);
+  }
+  return result;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function composeMessageHtml(template: string, values: ComposeValues): string {
+  let result = escapeHtml(template);
+  for (const key of Object.keys(FALLBACKS) as (keyof ComposeValues)[]) {
+    const value = escapeHtml(values[key] || FALLBACKS[key]);
+    result = result.split(`{${key}}`).join(`<mark>${value}</mark>`);
+  }
+  return result;
 }

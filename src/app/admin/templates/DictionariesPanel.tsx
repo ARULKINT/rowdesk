@@ -109,7 +109,7 @@ function TemplateRow({ template }: { template: TemplateDTO }) {
         </div>
       ) : (
         <>
-          <p className="mb-2 text-[0.85rem]" style={{ color: "var(--ink)" }}>
+          <p className="mb-2 whitespace-pre-wrap text-[0.85rem]" style={{ color: "var(--ink)" }}>
             {template.body}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -192,7 +192,7 @@ function AddTemplateForm({ dictionaryId }: { dictionaryId: string }) {
   return (
     <form onSubmit={handleSubmit} className="mt-2 flex flex-col gap-2">
       <textarea
-        placeholder="New template message — use {domain} where the record's domain should appear"
+        placeholder="New template message — use {domain} for the record's domain, {name} for the business name"
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={2}

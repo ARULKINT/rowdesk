@@ -71,8 +71,15 @@ export default function RowdeskScreen({
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const domain = useMemo(() => extractDomain(record?.websiteUrl ?? null), [record]);
+  const composeValues = useMemo(
+    () => ({ domain, name: record?.name ?? "" }),
+    [domain, record]
+  );
   const template = templates[templateIndex] ?? templates[0] ?? "";
-  const composedHtml = useMemo(() => composeMessageHtml(template, domain), [template, domain]);
+  const composedHtml = useMemo(
+    () => composeMessageHtml(template, composeValues),
+    [template, composeValues]
+  );
 
   function showToast(node: React.ReactNode) {
     setToast(node);
@@ -120,7 +127,7 @@ export default function RowdeskScreen({
   }
 
   async function handleCopy() {
-    const text = composeMessage(template, domain);
+    const text = composeMessage(template, composeValues);
     try {
       await navigator.clipboard.writeText(text);
       setCopyMsg("Copied!");
