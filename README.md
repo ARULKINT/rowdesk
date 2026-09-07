@@ -43,21 +43,28 @@ Never commit `.env`. `.env.example` documents the shape without secrets.
 
 ## Database
 
-Local dev uses SQLite (`prisma/dev.db`, gitignored). For production:
+Two parallel Prisma schemas, kept in sync mechanically instead of by hand:
 
-1. Provision a Postgres database (Vercel Postgres, Neon, Supabase, RDS, etc.) and get its connection string.
-2. In `prisma/schema.prisma`, change the datasource:
-   ```prisma
-   datasource db {
-     provider = "postgresql"
-     url      = env("DATABASE_URL")
-   }
-   ```
-3. Set `DATABASE_URL` to the Postgres connection string in your deployment environment.
-4. Run `npx prisma migrate deploy` against it (not `migrate dev` — that's dev-only and will prompt interactively). CI/CD should run this as a deploy step.
-5. Run `npm run db:seed` once against production only if you want the same seeded accounts — more realistically, create your real admin user directly (see [Admin usage](#admin-usage)) and skip the seed's sample data.
+- `prisma/schema.prisma` + `prisma/migrations/` — **SQLite**, used for local dev and the test suite. Edit this one.
+- `prisma/postgres/schema.prisma` + `prisma/postgres/migrations/` — **PostgreSQL**, used only for the Vercel/production build. This file is generated — never hand-edit it.
 
-Backups: this app doesn't implement its own backup mechanism — use your Postgres host's automated backups/point-in-time recovery (all the providers above offer this).
+Why two files instead of one "flip a line" schema: Prisma's `datasource.provider` is a static string, and migration `.sql` files are provider-specific (SQLite and Postgres SQL aren't interchangeable), so there's no way to share one migration history across both. Splitting them keeps local dev exactly on SQLite (no Docker/Postgres required to hack on this repo) while production runs real Postgres.
+
+After changing models in `prisma/schema.prisma`:
+
+```bash
+npx prisma migrate dev --name <change>              # as usual, against SQLite
+npm run db:sync-postgres-schema                      # regenerates prisma/postgres/schema.prisma
+DATABASE_URL="<postgres-url>" npx prisma migrate dev --schema prisma/postgres/schema.prisma --name <change>
+```
+
+That last command needs a real reachable Postgres URL (a Neon branch, local Postgres, whatever you use for this) since `migrate dev` computes and applies the diff interactively. In this project that's a Neon Postgres database, provisioned via the Vercel marketplace integration (`vercel integration add neon`) — it creates separate branches per Vercel environment (production/preview/development) automatically.
+
+Production migrations run automatically as part of the Vercel build (see `vercel.json`'s `buildCommand`): `prisma generate` and `prisma migrate deploy` (not `migrate dev` — that's interactive/dev-only) both target `prisma/postgres/schema.prisma`, then `next build` runs.
+
+Seeding: `npm run db:seed` works against whichever schema's client was last generated — run it locally against SQLite as usual; for production, more realistically create your real admin user directly (see [Admin usage](#admin-usage)) rather than seeding the sample dev data.
+
+Backups: this app doesn't implement its own backup mechanism — use your Postgres host's automated backups/point-in-time recovery (Neon, and most others, offer this).
 
 ## Authentication
 
@@ -97,12 +104,15 @@ Tests run against an isolated SQLite file (`prisma/test.db`, migrated fresh by `
 
 ## Deployment (Vercel)
 
-1. Push to a Git repo, import it into Vercel.
-2. Set the environment variables from the table above in the Vercel project settings (Production + Preview as needed).
-3. Point `DATABASE_URL` at your Postgres instance (see [Database](#database) — remember to flip the schema's datasource provider).
-4. Add a build step (or a one-time manual run) for `npx prisma migrate deploy` before the app serves traffic — Vercel's default build command is `next build`, so either wire this into a custom build command (`prisma migrate deploy && next build`) or run it separately in CI.
-5. If using Google Drive, update `GOOGLE_REDIRECT_URI` to the production URL and add the same redirect URI in Google Cloud Console.
-6. Deploy.
+This repo is already set up for it — `vercel.json`'s `buildCommand` runs `prisma generate` + `prisma migrate deploy` against `prisma/postgres/schema.prisma` before `next build`, so a normal Vercel deploy (git push, or `vercel --prod`) handles migrations automatically. To set this up from scratch elsewhere:
+
+1. Push to a Git repo, import it into Vercel (`vercel link` locally, or via the dashboard).
+2. Provision Postgres and connect it to the project — `vercel integration add neon --plan free_v3` (or Supabase, or point `DATABASE_URL` at any existing Postgres instance) sets `DATABASE_URL` for you across environments; Neon specifically gives each Vercel environment (production/preview/development) its own branch.
+3. Generate the initial Postgres migration once against a real reachable Postgres URL — see [Database](#database) — and commit `prisma/postgres/migrations/`.
+4. Set any remaining env vars from the table above (`ENCRYPTION_KEY`, `GOOGLE_*`) in the Vercel project settings if you're using Google Drive.
+5. Deploy. `vercel.json` handles running migrations as part of the build from here on — no separate migration step needed for future schema changes, as long as you commit the new `prisma/postgres/migrations/` entry (step 3's pattern) alongside the SQLite one.
+
+If using Google Drive: update `GOOGLE_REDIRECT_URI` to the production URL and add the same redirect URI in Google Cloud Console.
 
 ## Monitoring
 
