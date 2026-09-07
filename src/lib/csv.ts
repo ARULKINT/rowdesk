@@ -63,6 +63,19 @@ export interface ParsedRecordRow {
 
 export type RowRejectionReason = "missing_name" | "missing_phone";
 
+/**
+ * Strips scrape formatting (spaces, dashes, parens) from a phone number and
+ * drops a leading Indian trunk "0" or "91" country code, so "086809 48502"
+ * and "8680948502" both end up as the same clean 10-digit value instead of
+ * the two coexisting as different-looking numbers for the same lead.
+ */
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  return digits;
+}
+
 export type RowToRecordResult =
   | { ok: true; record: ParsedRecordRow }
   | { ok: false; reason: RowRejectionReason };
@@ -82,7 +95,8 @@ export function rowToRecord(
   if (!name) return { ok: false, reason: "missing_name" };
 
   const phoneCol = mapping.phone;
-  const phone = phoneCol ? row[phoneCol]?.trim() || null : null;
+  const phoneRaw = phoneCol ? row[phoneCol]?.trim() : "";
+  const phone = phoneRaw ? normalizePhone(phoneRaw) || null : null;
   if (!phone) return { ok: false, reason: "missing_phone" };
 
   const ratingCol = mapping.rating;

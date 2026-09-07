@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractDomain, mapColumns, rowToRecord } from "./csv";
+import { extractDomain, mapColumns, normalizePhone, rowToRecord } from "./csv";
 
 describe("mapColumns", () => {
   it("maps exact expected headers", () => {
@@ -59,7 +59,7 @@ describe("rowToRecord", () => {
     "website_url",
   ]).mapping;
 
-  it("trims whitespace from name and phone", () => {
+  it("trims whitespace from name and normalizes the phone number", () => {
     const result = rowToRecord(
       {
         name: "  ABC Motors  ",
@@ -73,7 +73,7 @@ describe("rowToRecord", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.record.name).toBe("ABC Motors");
-      expect(result.record.phone).toBe("+91 98765 43210");
+      expect(result.record.phone).toBe("9876543210");
     }
   });
 
@@ -117,6 +117,25 @@ describe("rowToRecord", () => {
     );
     expect(good.ok && good.record.rating).toBe(4.2);
     expect(bad.ok && bad.record.rating).toBeNull();
+  });
+});
+
+describe("normalizePhone", () => {
+  it("strips a leading trunk 0 and the space scraped listings add", () => {
+    expect(normalizePhone("086809 48502")).toBe("8680948502");
+  });
+
+  it("leaves an already-clean 10-digit number unchanged", () => {
+    expect(normalizePhone("8680948502")).toBe("8680948502");
+  });
+
+  it("strips a +91 country code and formatting", () => {
+    expect(normalizePhone("+91 98765 43210")).toBe("9876543210");
+    expect(normalizePhone("91-98765-43210")).toBe("9876543210");
+  });
+
+  it("strips dashes and parens", () => {
+    expect(normalizePhone("(868) 094-8502")).toBe("8680948502");
   });
 });
 
