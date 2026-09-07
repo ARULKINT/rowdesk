@@ -74,6 +74,8 @@ Username/email + password, bcrypt-hashed (cost 12), session cookie (httpOnly, `S
 
 Optional — the Admin → Google Drive page just shows "not configured" until you set it up. Steps are documented inline in `.env.example`; briefly: create a Google Cloud project, enable the Drive API, configure the OAuth consent screen with the `drive.readonly` scope, create a Web application OAuth client, register `<your app URL>/api/admin/drive/callback` as the redirect URI, then set the three `GOOGLE_*` env vars and `ENCRYPTION_KEY`.
 
+The **source folder is fixed via `GOOGLE_DRIVE_FOLDER_ID`**, not admin-editable in the UI — set it once in the environment (bare folder ID or a full Drive URL both work) and every deploy scans that folder plus all of its subfolders. Connecting an account auto-verifies and records the folder immediately; there's no separate "set folder" step. To point at a different folder, change the env var and redeploy/restart — that's a deliberate choice, not a missing feature.
+
 ## CSV format
 
 Expected columns (flexible naming — see `src/lib/csv.ts` for the full alias list): `name`, `phone`, `rating`, `maps_url`, `website_url`. Column detection is case/spacing/underscore-insensitive (`"Business Name"`, `business_name`, `businessname` all match).

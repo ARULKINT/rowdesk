@@ -13,6 +13,16 @@ export function isGoogleDriveConfigured(): boolean {
   );
 }
 
+/**
+ * The source folder is fixed via env var, not admin-editable in the UI —
+ * every deployment scans one designated folder (and its subfolders).
+ * Accepts either a bare folder ID or a full Drive URL in the env var.
+ */
+export function getConfiguredFolderId(): string | null {
+  const raw = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  return raw ? extractFolderId(raw) : null;
+}
+
 function createOAuthClient() {
   if (!isGoogleDriveConfigured()) {
     throw new Error(
@@ -63,6 +73,18 @@ export async function connectWithCode(code: string, connectedByUserId: string) {
     create: { singleton: true, ...record },
     update: record,
   });
+
+  // The folder is fixed via GOOGLE_DRIVE_FOLDER_ID, not admin-set — verify
+  // and record it right away so there's no separate "set folder" step.
+  const configuredFolderId = getConfiguredFolderId();
+  if (configuredFolderId) {
+    const drive = google.drive({ version: "v3", auth: client });
+    const folder = await verifyFolder(drive, configuredFolderId);
+    await prisma.googleDriveConnection.update({
+      where: { singleton: true },
+      data: { folderId: folder.id, folderName: folder.name },
+    });
+  }
 }
 
 export async function disconnectDrive(): Promise<void> {
@@ -129,7 +151,7 @@ export interface DriveCsvFile {
   modifiedTime: string;
 }
 
-export async function listCsvFilesInFolder(
+async function listCsvFilesDirect(
   drive: drive_v3.Drive,
   folderId: string
 ): Promise<DriveCsvFile[]> {
@@ -150,6 +172,58 @@ export async function listCsvFilesInFolder(
     }
     pageToken = data.nextPageToken ?? undefined;
   } while (pageToken);
+
+  return files;
+}
+
+async function listSubfolders(
+  drive: drive_v3.Drive,
+  folderId: string
+): Promise<{ id: string; name: string }[]> {
+  const folders: { id: string; name: string }[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const { data } = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.folder'`,
+      fields: "nextPageToken, files(id, name)",
+      pageToken,
+      pageSize: 200,
+    });
+    for (const f of data.files ?? []) {
+      if (f.id && f.name) folders.push({ id: f.id, name: f.name });
+    }
+    pageToken = data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return folders;
+}
+
+/** Lists CSV files in the given folder AND all of its subfolders
+ * (breadth-first, guarded against revisiting a folder twice). */
+export async function listCsvFilesInFolder(
+  drive: drive_v3.Drive,
+  rootFolderId: string,
+  options: { maxFolders?: number } = {}
+): Promise<DriveCsvFile[]> {
+  const maxFolders = options.maxFolders ?? 500;
+  const files: DriveCsvFile[] = [];
+  const visited = new Set<string>();
+  const queue: string[] = [rootFolderId];
+
+  while (queue.length > 0 && visited.size < maxFolders) {
+    const folderId = queue.shift()!;
+    if (visited.has(folderId)) continue;
+    visited.add(folderId);
+
+    const [folderFiles, subfolders] = await Promise.all([
+      listCsvFilesDirect(drive, folderId),
+      listSubfolders(drive, folderId),
+    ]);
+
+    files.push(...folderFiles);
+    for (const sf of subfolders) queue.push(sf.id);
+  }
 
   return files;
 }

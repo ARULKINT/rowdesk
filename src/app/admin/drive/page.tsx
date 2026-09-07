@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isGoogleDriveConfigured } from "@/lib/googleDrive";
+import { getConfiguredFolderId, isGoogleDriveConfigured } from "@/lib/googleDrive";
 import DrivePanel, { type DriveFileDTO } from "./DrivePanel";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,7 @@ export default async function AdminDrivePage({
       </h1>
       <DrivePanel
         configured={isGoogleDriveConfigured()}
+        folderEnvConfigured={Boolean(getConfiguredFolderId())}
         connection={
           connection
             ? {

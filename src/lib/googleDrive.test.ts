@@ -1,5 +1,129 @@
 import { describe, expect, it } from "vitest";
-import { classifyDriveFile, extractFolderId, isGoogleDriveConfigured } from "./googleDrive";
+import {
+  classifyDriveFile,
+  extractFolderId,
+  getConfiguredFolderId,
+  isGoogleDriveConfigured,
+  listCsvFilesInFolder,
+} from "./googleDrive";
+import type { drive_v3 } from "googleapis";
+
+interface FakeFolder {
+  id: string;
+  csvFiles: { id: string; name: string; modifiedTime: string }[];
+  subfolders: { id: string; name: string }[];
+}
+
+/** A minimal fake of the Drive client's `files.list`, keyed by parent
+ * folder id, enough to exercise listCsvFilesInFolder's traversal. */
+function fakeDrive(folders: Record<string, FakeFolder>): drive_v3.Drive {
+  return {
+    files: {
+      list: async ({ q }: { q?: string }) => {
+        const parentMatch = q?.match(/'([^']+)' in parents/);
+        const parentId = parentMatch?.[1];
+        const folder = parentId ? folders[parentId] : undefined;
+        const isFolderQuery = q?.includes("application/vnd.google-apps.folder");
+
+        if (!folder) return { data: { files: [] } };
+        return {
+          data: { files: isFolderQuery ? folder.subfolders : folder.csvFiles },
+        };
+      },
+    },
+  } as unknown as drive_v3.Drive;
+}
+
+describe("listCsvFilesInFolder", () => {
+  it("collects CSVs from the root folder alone", async () => {
+    const drive = fakeDrive({
+      root: {
+        id: "root",
+        csvFiles: [{ id: "f1", name: "a.csv", modifiedTime: "2026-01-01T00:00:00Z" }],
+        subfolders: [],
+      },
+    });
+
+    const files = await listCsvFilesInFolder(drive, "root");
+    expect(files.map((f) => f.name)).toEqual(["a.csv"]);
+  });
+
+  it("recurses into subfolders and collects CSVs from every level", async () => {
+    const drive = fakeDrive({
+      root: {
+        id: "root",
+        csvFiles: [{ id: "f1", name: "a.csv", modifiedTime: "2026-01-01T00:00:00Z" }],
+        subfolders: [{ id: "sub1", name: "Sub 1" }],
+      },
+      sub1: {
+        id: "sub1",
+        csvFiles: [{ id: "f2", name: "b.csv", modifiedTime: "2026-01-02T00:00:00Z" }],
+        subfolders: [{ id: "sub2", name: "Sub 2" }],
+      },
+      sub2: {
+        id: "sub2",
+        csvFiles: [{ id: "f3", name: "c.csv", modifiedTime: "2026-01-03T00:00:00Z" }],
+        subfolders: [],
+      },
+    });
+
+    const files = await listCsvFilesInFolder(drive, "root");
+    expect(files.map((f) => f.name).sort()).toEqual(["a.csv", "b.csv", "c.csv"]);
+  });
+
+  it("doesn't revisit a folder it's already processed", async () => {
+    let sub1Calls = 0;
+    const drive = {
+      files: {
+        list: async ({ q }: { q?: string }) => {
+          const parentMatch = q?.match(/'([^']+)' in parents/);
+          const parentId = parentMatch?.[1];
+          const isFolderQuery = q?.includes("application/vnd.google-apps.folder");
+
+          if (parentId === "sub1" && !isFolderQuery) sub1Calls += 1;
+
+          if (parentId === "root") {
+            return {
+              data: {
+                files: isFolderQuery
+                  ? [
+                      { id: "sub1", name: "Sub 1" },
+                      { id: "sub1", name: "Sub 1 (duplicate parent link)" },
+                    ]
+                  : [],
+              },
+            };
+          }
+          if (parentId === "sub1") {
+            return { data: { files: isFolderQuery ? [] : [{ id: "f1", name: "a.csv", modifiedTime: "2026-01-01T00:00:00Z" }] } };
+          }
+          return { data: { files: [] } };
+        },
+      },
+    } as unknown as drive_v3.Drive;
+
+    const files = await listCsvFilesInFolder(drive, "root");
+    expect(files).toHaveLength(1);
+    expect(sub1Calls).toBe(1);
+  });
+});
+
+describe("getConfiguredFolderId", () => {
+  it("returns null when unset", () => {
+    delete process.env.GOOGLE_DRIVE_FOLDER_ID;
+    expect(getConfiguredFolderId()).toBeNull();
+  });
+
+  it("extracts the folder ID whether given a bare ID or a full URL", () => {
+    process.env.GOOGLE_DRIVE_FOLDER_ID = "https://drive.google.com/drive/folders/abc123?usp=sharing";
+    expect(getConfiguredFolderId()).toBe("abc123");
+
+    process.env.GOOGLE_DRIVE_FOLDER_ID = "abc123";
+    expect(getConfiguredFolderId()).toBe("abc123");
+
+    delete process.env.GOOGLE_DRIVE_FOLDER_ID;
+  });
+});
 
 describe("extractFolderId", () => {
   it("accepts a bare folder ID", () => {

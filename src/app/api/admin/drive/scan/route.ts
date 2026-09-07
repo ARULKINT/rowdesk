@@ -4,6 +4,7 @@ import { getApiUser } from "@/lib/auth";
 import {
   classifyDriveFile,
   getAuthorizedDriveClient,
+  getConfiguredFolderId,
   getConnection,
   listCsvFilesInFolder,
   type DriveFileStatus,
@@ -21,13 +22,20 @@ export async function POST(request: Request) {
   }
 
   const connection = await getConnection();
-  if (!connection?.folderId) {
-    return NextResponse.json({ error: "Configure a Drive folder first." }, { status: 400 });
+  if (!connection) {
+    return NextResponse.json({ error: "Connect Google Drive first." }, { status: 400 });
+  }
+  const folderId = getConfiguredFolderId();
+  if (!folderId) {
+    return NextResponse.json(
+      { error: "GOOGLE_DRIVE_FOLDER_ID isn't set in the environment." },
+      { status: 400 }
+    );
   }
 
   try {
     const drive = await getAuthorizedDriveClient();
-    const files = await listCsvFilesInFolder(drive, connection.folderId);
+    const files = await listCsvFilesInFolder(drive, folderId);
 
     let created = 0;
     let updated = 0;

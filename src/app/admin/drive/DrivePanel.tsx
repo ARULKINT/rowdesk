@@ -20,12 +20,6 @@ export interface ConnectionDTO {
   folderName: string | null;
 }
 
-const inputStyle: React.CSSProperties = {
-  borderColor: "var(--border)",
-  background: "var(--surface)",
-  color: "var(--ink)",
-};
-
 const STATUS_COLORS: Record<DriveFileDTO["status"], { bg: string; fg: string }> = {
   new: { bg: "var(--accent-soft)", fg: "var(--accent)" },
   updated: { bg: "var(--accent-soft)", fg: "var(--accent)" },
@@ -46,7 +40,15 @@ async function post(url: string, body?: Record<string, unknown>) {
   return data;
 }
 
-function ConnectionCard({ connection, configured }: { connection: ConnectionDTO | null; configured: boolean }) {
+function ConnectionCard({
+  connection,
+  configured,
+  folderEnvConfigured,
+}: {
+  connection: ConnectionDTO | null;
+  configured: boolean;
+  folderEnvConfigured: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +80,24 @@ function ConnectionCard({ connection, configured }: { connection: ConnectionDTO 
           <code>GOOGLE_REDIRECT_URI</code> in your environment (an OAuth client from Google Cloud
           Console, with the redirect URI registered as{" "}
           <code>&lt;your app URL&gt;/api/admin/drive/callback</code>), then reload this page.
+        </p>
+      </div>
+    );
+  }
+
+  if (!folderEnvConfigured) {
+    return (
+      <div
+        className="mb-6 rounded-[12px] border-2 p-5"
+        style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+      >
+        <p className="mb-2 font-semibold" style={{ color: "var(--ink)" }}>
+          No source folder configured
+        </p>
+        <p className="text-[0.85rem]" style={{ color: "var(--ink-muted)" }}>
+          Set <code>GOOGLE_DRIVE_FOLDER_ID</code> in your environment (a folder ID or Drive
+          link). The folder is fixed at the environment level — it isn’t editable from this
+          page.
         </p>
       </div>
     );
@@ -121,7 +141,15 @@ function ConnectionCard({ connection, configured }: { connection: ConnectionDTO 
         </div>
         <p className="mt-1 text-[0.82rem]" style={{ color: "var(--ink-muted)" }}>
           {connection.googleEmail}
-          {connection.folderName ? ` · Folder: ${connection.folderName}` : " · No folder selected"}
+          {connection.folderName ? (
+            <>
+              {" · Folder: "}
+              <strong>{connection.folderName}</strong>
+              {" (and its subfolders) — fixed, not admin-editable"}
+            </>
+          ) : (
+            " · Couldn't verify the configured folder — check GOOGLE_DRIVE_FOLDER_ID and the connected account's access."
+          )}
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -141,66 +169,6 @@ function ConnectionCard({ connection, configured }: { connection: ConnectionDTO 
         </button>
       </div>
     </div>
-  );
-}
-
-function FolderForm({ connection }: { connection: ConnectionDTO }) {
-  const router = useRouter();
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!value.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await post("/api/admin/drive/folder", { folder: value });
-      setValue("");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't verify that folder.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="mb-6 flex flex-wrap items-center gap-3 rounded-[12px] border-2 p-5"
-      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-    >
-      <div className="flex-1 min-w-[240px]">
-        <label
-          className="mb-1.5 block text-[0.7rem] font-semibold uppercase tracking-[0.06em]"
-          style={{ color: "var(--ink-muted)" }}
-        >
-          Source folder
-        </label>
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={connection.folderName ? `Currently: ${connection.folderName}` : "Folder ID or Drive link"}
-          className="w-full rounded-[8px] border-2 p-2.5 text-[0.85rem]"
-          style={inputStyle}
-        />
-      </div>
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded-[8px] border-2 px-4 py-2.5 text-[0.82rem] font-bold disabled:opacity-50"
-        style={{ borderColor: "var(--border)", background: "var(--accent)", color: "var(--accent-contrast)" }}
-      >
-        {busy ? "Verifying…" : connection.folderId ? "Change folder" : "Set folder"}
-      </button>
-      {error && (
-        <span className="w-full text-[0.78rem] font-medium" style={{ color: "var(--accent)" }}>
-          {error}
-        </span>
-      )}
-    </form>
   );
 }
 
@@ -278,12 +246,14 @@ function ActionsBar({ hasFolder }: { hasFolder: boolean }) {
 
 export default function DrivePanel({
   configured,
+  folderEnvConfigured,
   connection,
   files,
   bannerError,
   justConnected,
 }: {
   configured: boolean;
+  folderEnvConfigured: boolean;
   connection: ConnectionDTO | null;
   files: DriveFileDTO[];
   bannerError?: string;
@@ -317,9 +287,11 @@ export default function DrivePanel({
         </div>
       )}
 
-      <ConnectionCard connection={connection} configured={configured} />
-
-      {connection && <FolderForm connection={connection} />}
+      <ConnectionCard
+        connection={connection}
+        configured={configured}
+        folderEnvConfigured={folderEnvConfigured}
+      />
 
       {connection?.folderId && (
         <>

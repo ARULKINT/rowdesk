@@ -80,6 +80,3 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, "New password must be at least 8 characters."),
 });
 
-export const driveFolderSchema = z.object({
-  folder: z.string().trim().min(1, "Enter a folder ID or link."),
-});
