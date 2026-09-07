@@ -1,26 +1,89 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --bg: #eceee6;
+  --surface: #fffefb;
+  --surface-alt: #f4f2e8;
+  --ink: #171a15;
+  --ink-muted: #5c6358;
+  --border: #171a15;
+  --border-soft: #c7cabc;
+  --accent: #bd4c0f;
+  --accent-contrast: #fff8f0;
+  --accent-soft: #f6e0cd;
+  --success: #1f6e52;
+  --success-soft: #dcece2;
+  --chip: #e3e0d0;
+  --shadow: rgba(23, 26, 21, 0.14);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display-stack: var(--font-display), "Libre Franklin", system-ui, sans-serif;
+  --font-body-stack: var(--font-body), "IBM Plex Sans", system-ui, sans-serif;
+  --font-data-stack: var(--font-data), "IBM Plex Mono", ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --bg: #14160f;
+    --surface: #1c1f16;
+    --surface-alt: #23261b;
+    --ink: #edf0e4;
+    --ink-muted: #9ba392;
+    --border: #cfd3c2;
+    --border-soft: #3a3f2e;
+    --accent: #e28744;
+    --accent-contrast: #1b1000;
+    --accent-soft: #3a2716;
+    --success: #4fbf93;
+    --success-soft: #1b3327;
+    --chip: #2a2e20;
+    --shadow: rgba(0, 0, 0, 0.4);
   }
 }
 
+:root[data-theme="dark"] {
+  --bg: #14160f;
+  --surface: #1c1f16;
+  --surface-alt: #23261b;
+  --ink: #edf0e4;
+  --ink-muted: #9ba392;
+  --border: #cfd3c2;
+  --border-soft: #3a3f2e;
+  --accent: #e28744;
+  --accent-contrast: #1b1000;
+  --accent-soft: #3a2716;
+  --success: #4fbf93;
+  --success-soft: #1b3327;
+  --chip: #2a2e20;
+  --shadow: rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body-stack);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card,
+  .composer,
+  button,
+  .toggle-track,
+  .chip-btn {
+    transition:
+      border-color 120ms ease,
+      background-color 120ms ease,
+      transform 120ms ease,
+      opacity 160ms ease;
+  }
 }
