@@ -3,7 +3,10 @@ import { google, drive_v3 } from "googleapis";
 import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt } from "@/lib/encryption";
 
-const SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
+const SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/userinfo.email",
+];
 
 export function isGoogleDriveConfigured(): boolean {
   return Boolean(
