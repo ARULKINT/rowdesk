@@ -64,16 +64,27 @@ export interface ParsedRecordRow {
 export type RowRejectionReason = "missing_name" | "missing_phone";
 
 /**
- * Strips scrape formatting (spaces, dashes, parens) from a phone number and
- * drops a leading Indian trunk "0" or "91" country code, so "086809 48502"
- * and "8680948502" both end up as the same clean 10-digit value instead of
- * the two coexisting as different-looking numbers for the same lead.
+ * Cleans a scraped phone number down to a canonical 10-digit Indian mobile
+ * number, or returns null if the row should be dropped entirely.
+ *
+ *  - Strips all non-digit formatting (spaces, dashes, parens).
+ *  - Drops a leading "91" country code (12 digits total -> 10).
+ *  - Drops a leading trunk "0" only when there are 11 digits total, i.e.
+ *    0 + a clean 10-digit number (e.g. "086809 48502" -> "8680948502").
+ *  - Anything left that isn't a 10-digit number starting 6-9 is rejected
+ *    (returns null) rather than guessed at or partially cleaned:
+ *      - a leading-0 number that was already only 10 digits — the real
+ *        last digit was lost upstream, before the CSV even reached us, and
+ *        can't be recovered by stripping the 0 (that just leaves 9 digits);
+ *      - a landline/STD-code number (starts 0-5, not a mobile prefix) —
+ *        useless for SMS/WhatsApp outreach anyway;
+ *      - garbage-length scrape noise (too short or too long).
  */
-export function normalizePhone(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
-  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
-  return digits;
+export function normalizePhone(raw: string): string | null {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return /^[6-9]\d{9}$/.test(digits) ? digits : null;
 }
 
 export type RowToRecordResult =
@@ -96,7 +107,7 @@ export function rowToRecord(
 
   const phoneCol = mapping.phone;
   const phoneRaw = phoneCol ? row[phoneCol]?.trim() : "";
-  const phone = phoneRaw ? normalizePhone(phoneRaw) || null : null;
+  const phone = phoneRaw ? normalizePhone(phoneRaw) : null;
   if (!phone) return { ok: false, reason: "missing_phone" };
 
   const ratingCol = mapping.rating;

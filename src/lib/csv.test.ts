@@ -93,9 +93,17 @@ describe("rowToRecord", () => {
     expect(result).toEqual({ ok: false, reason: "missing_phone" });
   });
 
-  it("keeps the record when rating, maps_url or website_url are blank", () => {
+  it("removes the record when phone doesn't clean up into a valid mobile number", () => {
     const result = rowToRecord(
       { name: "ABC Motors", phone: "12345", rating: "", maps_url: "", website_url: "" },
+      mapping
+    );
+    expect(result).toEqual({ ok: false, reason: "missing_phone" });
+  });
+
+  it("keeps the record when rating, maps_url or website_url are blank", () => {
+    const result = rowToRecord(
+      { name: "ABC Motors", phone: "9876543210", rating: "", maps_url: "", website_url: "" },
       mapping
     );
     expect(result.ok).toBe(true);
@@ -108,11 +116,11 @@ describe("rowToRecord", () => {
 
   it("parses a valid rating and ignores an unparseable one", () => {
     const good = rowToRecord(
-      { name: "A", phone: "1", rating: "4.2", maps_url: "", website_url: "" },
+      { name: "A", phone: "9876543210", rating: "4.2", maps_url: "", website_url: "" },
       mapping
     );
     const bad = rowToRecord(
-      { name: "A", phone: "1", rating: "n/a", maps_url: "", website_url: "" },
+      { name: "A", phone: "9876543210", rating: "n/a", maps_url: "", website_url: "" },
       mapping
     );
     expect(good.ok && good.record.rating).toBe(4.2);
@@ -121,11 +129,11 @@ describe("rowToRecord", () => {
 });
 
 describe("normalizePhone", () => {
-  it("strips a leading trunk 0 and the space scraped listings add", () => {
+  it("strips a leading trunk 0 when there are 11 digits total, plus the space", () => {
     expect(normalizePhone("086809 48502")).toBe("8680948502");
   });
 
-  it("leaves an already-clean 10-digit number unchanged", () => {
+  it("leaves an already-clean 10-digit mobile number unchanged", () => {
     expect(normalizePhone("8680948502")).toBe("8680948502");
   });
 
@@ -136,6 +144,29 @@ describe("normalizePhone", () => {
 
   it("strips dashes and parens", () => {
     expect(normalizePhone("(868) 094-8502")).toBe("8680948502");
+  });
+
+  it("rejects a leading-0 number that was already only 10 digits", () => {
+    // Real production examples: the business's OTHER listing has the intact
+    // 10-digit number ("9751255539"), but this listing lost its real last
+    // digit upstream (before the CSV ever reached us) and got a fake
+    // leading 0 stuck on to disguise it. Stripping the 0 would only leave a
+    // 9-digit number — still wrong — so the row is rejected instead.
+    expect(normalizePhone("0975125553")).toBeNull();
+    expect(normalizePhone("0967762420")).toBeNull();
+    expect(normalizePhone("0744833999")).toBeNull();
+  });
+
+  it("rejects a landline / STD-code number (doesn't start 6-9)", () => {
+    // Real production example: Ramana Communication, "4132224389" — a
+    // Puducherry STD-code-based landline. Not reachable by SMS/WhatsApp
+    // outreach, so it's dropped rather than kept as a dead lead.
+    expect(normalizePhone("4132224389")).toBeNull();
+  });
+
+  it("rejects garbage-length scrape noise", () => {
+    expect(normalizePhone("360850850977")).toBeNull(); // 13 digits
+    expect(normalizePhone("50994421248")).toBeNull(); // 11 digits, doesn't start with 0
   });
 });
 
