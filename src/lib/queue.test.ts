@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./prisma";
 import {
   claimNextRecordForUser,
+  claimPreviousInFile,
   completeRecord,
   OwnershipError,
   releaseRecord,
@@ -165,6 +166,108 @@ describe("ownership enforcement", () => {
     await expect(completeRecord(claimed!.id, userB.id)).rejects.toThrow(OwnershipError);
     await expect(skipRecord(claimed!.id, userB.id)).rejects.toThrow(OwnershipError);
     await expect(releaseRecord(claimed!.id, userB.id)).rejects.toThrow(OwnershipError);
+  });
+});
+
+describe("claimPreviousInFile", () => {
+  it("steps back to the previous row and claims it, releasing the current claim without changing its status", async () => {
+    const file = await createFileWithRecords(3);
+    const user = await createUser("user1");
+    const rows = await prisma.record.findMany({
+      where: { sourceFileId: file.id },
+      orderBy: { rowIndex: "asc" },
+    });
+
+    await prisma.record.update({ where: { id: rows[0].id }, data: { status: "skipped" } });
+    await prisma.record.update({
+      where: { id: rows[1].id },
+      data: { claimedById: user.id, claimedAt: new Date() },
+    });
+
+    const result = await claimPreviousInFile(rows[1].id, user.id);
+    expect(result.moved).toBe(true);
+    expect(result.record!.id).toBe(rows[0].id);
+    expect(result.record!.claimedById).toBe(user.id);
+
+    const releasedRow = await prisma.record.findUnique({ where: { id: rows[1].id } });
+    expect(releasedRow!.claimedById).toBeNull();
+    expect(releasedRow!.status).toBe("pending");
+  });
+
+  it("reports start_of_file and leaves the claim untouched when already on row 0", async () => {
+    const file = await createFileWithRecords(2);
+    const user = await createUser("user1");
+    const row0 = await prisma.record.findFirstOrThrow({
+      where: { sourceFileId: file.id, rowIndex: 0 },
+    });
+    await prisma.record.update({
+      where: { id: row0.id },
+      data: { claimedById: user.id, claimedAt: new Date() },
+    });
+
+    const result = await claimPreviousInFile(row0.id, user.id);
+    expect(result.moved).toBe(false);
+    expect(result.blockedReason).toBe("start_of_file");
+    expect(result.record!.id).toBe(row0.id);
+    expect(result.record!.claimedById).toBe(user.id);
+  });
+
+  it("refuses to step back into a done row, which stays permanently locked", async () => {
+    const file = await createFileWithRecords(2);
+    const user = await createUser("user1");
+    const rows = await prisma.record.findMany({
+      where: { sourceFileId: file.id },
+      orderBy: { rowIndex: "asc" },
+    });
+    await prisma.record.update({ where: { id: rows[0].id }, data: { status: "done" } });
+    await prisma.record.update({
+      where: { id: rows[1].id },
+      data: { claimedById: user.id, claimedAt: new Date() },
+    });
+
+    const result = await claimPreviousInFile(rows[1].id, user.id);
+    expect(result.moved).toBe(false);
+    expect(result.blockedReason).toBe("target_done");
+    expect(result.record!.id).toBe(rows[1].id);
+    expect(result.record!.claimedById).toBe(user.id);
+  });
+
+  it("steals the claim from whoever currently holds the previous row", async () => {
+    const file = await createFileWithRecords(2);
+    const userA = await createUser("userA");
+    const userB = await createUser("userB");
+    const rows = await prisma.record.findMany({
+      where: { sourceFileId: file.id },
+      orderBy: { rowIndex: "asc" },
+    });
+    await prisma.record.update({
+      where: { id: rows[0].id },
+      data: { claimedById: userB.id, claimedAt: new Date() },
+    });
+    await prisma.record.update({
+      where: { id: rows[1].id },
+      data: { claimedById: userA.id, claimedAt: new Date() },
+    });
+
+    const result = await claimPreviousInFile(rows[1].id, userA.id);
+    expect(result.moved).toBe(true);
+    expect(result.record!.id).toBe(rows[0].id);
+    expect(result.record!.claimedById).toBe(userA.id);
+  });
+
+  it("rejects a caller who doesn't hold the current claim", async () => {
+    const file = await createFileWithRecords(2);
+    const userA = await createUser("userA");
+    const userB = await createUser("userB");
+    const row1 = await prisma.record.findFirstOrThrow({
+      where: { sourceFileId: file.id, rowIndex: 1 },
+    });
+    await prisma.record.update({
+      where: { id: row1.id },
+      data: { claimedById: userA.id, claimedAt: new Date() },
+    });
+
+    await expect(claimPreviousInFile(row1.id, userB.id)).rejects.toThrow(OwnershipError);
   });
 });
 

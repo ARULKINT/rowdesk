@@ -49,6 +49,22 @@ async function queueAction(recordId: string, action: "skip" | "done" | "next") {
   return data.record as QueueRecordDTO | null;
 }
 
+interface PreviousResult {
+  record: QueueRecordDTO | null;
+  moved: boolean;
+  blockedReason?: "start_of_file" | "target_done";
+}
+
+async function queuePrevious(recordId: string): Promise<PreviousResult> {
+  const res = await fetch("/api/queue/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recordId, action: "previous" }),
+  });
+  if (!res.ok) throw new Error("Failed to save");
+  return res.json();
+}
+
 async function claimNext() {
   const res = await fetch("/api/queue/claim", { method: "POST" });
   if (!res.ok) throw new Error("Failed to claim");
@@ -173,6 +189,28 @@ export default function RowdeskScreen({
         );
       }
 
+      setRecord(next);
+    } catch {
+      showToast("Couldn't save — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePrevious() {
+    if (!record || busy) return;
+    setBusy(true);
+    setCopyMsg("");
+
+    try {
+      const { record: next, moved, blockedReason } = await queuePrevious(record.id);
+      if (!moved) {
+        showToast(
+          blockedReason === "target_done"
+            ? "The previous row is already marked done"
+            : "This is the first row in the file"
+        );
+      }
       setRecord(next);
     } catch {
       showToast("Couldn't save — try again");
@@ -371,6 +409,14 @@ export default function RowdeskScreen({
         <div className={styles.actions}>
           <button
             type="button"
+            className={styles.btnNext}
+            onClick={handlePrevious}
+            disabled={busy || record.rowIndex === 0}
+          >
+            Previous
+          </button>
+          <button
+            type="button"
             className={styles.btnSkip}
             onClick={() => runAction("skip")}
             disabled={busy}
@@ -391,7 +437,7 @@ export default function RowdeskScreen({
             onClick={() => runAction("next")}
             disabled={busy}
           >
-            Next Name
+            Next
           </button>
         </div>
 

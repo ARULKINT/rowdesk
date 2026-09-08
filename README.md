@@ -88,10 +88,9 @@ One record at a time, locked to whoever claims it:
 - **Claim**: visiting `/dashboard` atomically claims the next available (`pending` or previously-`skipped`, unclaimed) record, ordered by source file then row — fresh `pending` records are preferred over `skipped` ones so a user skipping through the queue makes forward progress instead of cycling back to what they just skipped.
 - **Done**: permanently locks the record (`status=done`, `doneBy`, `doneAt`) — it can never be claimed again.
 - **Skip**: releases the claim and marks the record `skipped`; it re-enters the shared pool for anyone (including the same user later) to pick up.
-- **Next Name**: releases the claim without changing status.
+- **Next**: releases the claim without changing status, then claims the next available record as usual.
+- **Previous**: steps back to the previous row (by row position) *in the same source file* and claims it, releasing the current claim without changing its status. This is a deliberate exception to the normal "only claim what's available" rule — it steals the claim from whoever currently holds that row, if anyone, so you can quickly correct the last record or two. The one thing it won't do is step back into a `done` row, since done stays permanently locked; disabled entirely on row 1 of a file.
 - **Stale claims**: a record claimed and not resolved within the configured timeout (Admin → Settings, default 30 minutes) is automatically released back to the pool on the next claim attempt anywhere in the app.
-
-Not implemented: a "Previous" button — both source specs hedge this ("where appropriate," "do not bypass ownership rules") without resolving what it should do once locking is in play, so it's left as an open question rather than guessed at.
 
 ## Testing
 

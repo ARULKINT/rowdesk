@@ -67,7 +67,7 @@ export const createDictionarySchema = z.object({
 
 export const queueActionSchema = z.object({
   recordId: z.string().trim().min(1, "Invalid request."),
-  action: z.enum(["skip", "done", "next"]),
+  action: z.enum(["skip", "done", "next", "previous"]),
 });
 
 export const recordPatchSchema = z.object({

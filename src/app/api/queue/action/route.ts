@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getApiUser } from "@/lib/auth";
 import {
   claimNextRecordForUser,
+  claimPreviousInFile,
   completeRecord,
   OwnershipError,
   releaseRecord,
@@ -24,6 +25,11 @@ export async function POST(request: Request) {
   const { recordId, action } = parsed.data;
 
   try {
+    if (action === "previous") {
+      const { record, moved, blockedReason } = await claimPreviousInFile(recordId, user.id);
+      return NextResponse.json({ record, moved, blockedReason });
+    }
+
     if (action === "skip") await skipRecord(recordId, user.id);
     else if (action === "done") await completeRecord(recordId, user.id);
     else await releaseRecord(recordId, user.id);

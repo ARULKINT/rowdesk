@@ -424,7 +424,7 @@
 /* ---- action bar ---- */
 .actions {
   display: grid;
-  grid-template-columns: 1fr 1.6fr 1fr;
+  grid-template-columns: 0.85fr 0.85fr 1.6fr 0.85fr;
   gap: 10px;
   margin-top: 18px;
 }

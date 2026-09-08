@@ -199,3 +199,64 @@ export async function completeRecord(recordId: string, userId: string) {
   });
   return updated;
 }
+
+export type PreviousBlockedReason = "start_of_file" | "target_done";
+
+/**
+ * Steps back to the previous row (by rowIndex) in the same source file and
+ * claims it for the caller, releasing their current claim without changing
+ * its status — a deliberate exception to the normal "claim only what's
+ * available" rule, for quickly correcting the last record or two. Steals
+ * the claim from whoever currently holds the target row, if anyone; a
+ * `done` row is still immutable and can't be stepped back into.
+ */
+export async function claimPreviousInFile(
+  currentRecordId: string,
+  userId: string
+): Promise<{ record: RecordWithPosition | null; moved: boolean; blockedReason?: PreviousBlockedReason }> {
+  const current = await prisma.record.findUnique({
+    where: { id: currentRecordId },
+    include: { sourceFile: true },
+  });
+  if (!current || current.claimedById !== userId) throw new OwnershipError();
+
+  const target = await prisma.record.findFirst({
+    where: { sourceFileId: current.sourceFileId, rowIndex: current.rowIndex - 1 },
+    include: { sourceFile: true },
+  });
+
+  if (!target) {
+    return { record: await attachPosition(current), moved: false, blockedReason: "start_of_file" };
+  }
+  if (target.status === "done") {
+    return { record: await attachPosition(current), moved: false, blockedReason: "target_done" };
+  }
+
+  const previousOwnerId = target.claimedById;
+
+  await prisma.record.update({
+    where: { id: current.id },
+    data: { claimedById: null, claimedAt: null },
+  });
+  await logAudit({
+    userId,
+    action: "record_released",
+    entityType: "Record",
+    entityId: current.id,
+  });
+
+  const claimedTarget = await prisma.record.update({
+    where: { id: target.id },
+    data: { claimedById: userId, claimedAt: new Date() },
+    include: { sourceFile: true },
+  });
+  await logAudit({
+    userId,
+    action: "record_claimed",
+    entityType: "Record",
+    entityId: target.id,
+    metadata: { via: "previous", previousOwnerId },
+  });
+
+  return { record: await attachPosition(claimedTarget), moved: true };
+}
