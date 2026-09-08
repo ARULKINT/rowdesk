@@ -48,6 +48,8 @@ export const settingsSchema = z.object({
 export const createTemplateSchema = z.object({
   dictionaryId: z.string().trim().min(1),
   body: z.string().trim().min(1, "Message body is required.").max(2000),
+  stage: z.enum(["initial", "followup1", "followup2"]).default("initial"),
+  language: z.enum(["english", "tamil"]).default("english"),
 });
 
 export const editTemplateSchema = z.discriminatedUnion("op", [
@@ -67,7 +69,7 @@ export const createDictionarySchema = z.object({
 
 export const queueActionSchema = z.object({
   recordId: z.string().trim().min(1, "Invalid request."),
-  action: z.enum(["skip", "done", "next", "previous"]),
+  action: z.enum(["skip", "done", "next", "previous", "advance"]),
 });
 
 export const recordPatchSchema = z.object({

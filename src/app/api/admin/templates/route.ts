@@ -17,10 +17,10 @@ export async function POST(request: Request) {
 
   const parsed = await parseJsonBody(request, createTemplateSchema);
   if ("error" in parsed) return parsed.error;
-  const { dictionaryId, body: text } = parsed.data;
+  const { dictionaryId, body: text, stage, language } = parsed.data;
 
   const maxPosition = await prisma.template.aggregate({
-    where: { dictionaryId },
+    where: { dictionaryId, stage, language },
     _max: { position: true },
   });
 
@@ -29,6 +29,8 @@ export async function POST(request: Request) {
       dictionaryId,
       body: text,
       position: (maxPosition._max.position ?? -1) + 1,
+      stage,
+      language,
       createdById: user.id,
     },
   });
@@ -38,7 +40,7 @@ export async function POST(request: Request) {
     action: "template_created",
     entityType: "Template",
     entityId: template.id,
-    metadata: { dictionaryId },
+    metadata: { dictionaryId, stage, language },
   });
 
   return NextResponse.json({ id: template.id });

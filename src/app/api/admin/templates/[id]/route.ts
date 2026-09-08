@@ -46,9 +46,10 @@ export async function PATCH(
     return NextResponse.json({ ok: true });
   }
 
-  // op === "move"
+  // op === "move" — scoped to the same stage+language slot, so reordering
+  // one slot's templates never disturbs another slot's ordering.
   const siblings = await prisma.template.findMany({
-    where: { dictionaryId: template.dictionaryId },
+    where: { dictionaryId: template.dictionaryId, stage: template.stage, language: template.language },
     orderBy: { position: "asc" },
   });
   const idx = siblings.findIndex((t) => t.id === id);

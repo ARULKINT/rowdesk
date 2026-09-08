@@ -3,11 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+export type Stage = "initial" | "followup1" | "followup2";
+export type Language = "english" | "tamil";
+
 export interface TemplateDTO {
   id: string;
   body: string;
   position: number;
   status: "active" | "retired";
+  stage: Stage;
+  language: Language;
 }
 
 export interface DictionaryDTO {
@@ -16,6 +21,16 @@ export interface DictionaryDTO {
   isActive: boolean;
   templates: TemplateDTO[];
 }
+
+const STAGES: { value: Stage; label: string }[] = [
+  { value: "initial", label: "Initial" },
+  { value: "followup1", label: "Follow-up 1 (3 days after Initial)" },
+  { value: "followup2", label: "Follow-up 2 (3 days after Follow-up 1)" },
+];
+const LANGUAGES: { value: Language; label: string }[] = [
+  { value: "english", label: "English" },
+  { value: "tamil", label: "Tamil" },
+];
 
 const inputStyle: React.CSSProperties = {
   borderColor: "var(--border)",
@@ -171,7 +186,15 @@ function TemplateRow({ template }: { template: TemplateDTO }) {
   );
 }
 
-function AddTemplateForm({ dictionaryId }: { dictionaryId: string }) {
+function AddTemplateForm({
+  dictionaryId,
+  stage,
+  language,
+}: {
+  dictionaryId: string;
+  stage: Stage;
+  language: Language;
+}) {
   const router = useRouter();
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -181,7 +204,7 @@ function AddTemplateForm({ dictionaryId }: { dictionaryId: string }) {
     if (!body.trim()) return;
     setBusy(true);
     try {
-      await post("/api/admin/templates", { dictionaryId, body });
+      await post("/api/admin/templates", { dictionaryId, body, stage, language });
       setBody("");
       router.refresh();
     } finally {
@@ -208,6 +231,40 @@ function AddTemplateForm({ dictionaryId }: { dictionaryId: string }) {
         + Add template
       </button>
     </form>
+  );
+}
+
+function StageLanguageSection({
+  dictionaryId,
+  stage,
+  language,
+  templates,
+}: {
+  dictionaryId: string;
+  stage: Stage;
+  language: Language;
+  templates: TemplateDTO[];
+}) {
+  return (
+    <div
+      className="rounded-[8px] p-3"
+      style={{ background: "var(--surface-alt, transparent)", border: "1px dashed var(--border-soft)" }}
+    >
+      <h3 className="mb-2 text-[0.78rem] font-bold uppercase tracking-[0.04em]" style={{ color: "var(--ink-muted)" }}>
+        {STAGES.find((s) => s.value === stage)?.label} · {LANGUAGES.find((l) => l.value === language)?.label}
+      </h3>
+      <div className="flex flex-col gap-2">
+        {templates.length === 0 && (
+          <p className="text-[0.78rem]" style={{ color: "var(--ink-muted)" }}>
+            No template yet — the composer will show a placeholder until one is added.
+          </p>
+        )}
+        {templates.map((t) => (
+          <TemplateRow key={t.id} template={t} />
+        ))}
+      </div>
+      <AddTemplateForm dictionaryId={dictionaryId} stage={stage} language={language} />
+    </div>
   );
 }
 
@@ -254,18 +311,24 @@ function DictionaryCard({ dictionary }: { dictionary: DictionaryDTO }) {
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        {dictionary.templates.length === 0 && (
-          <p className="text-[0.8rem]" style={{ color: "var(--ink-muted)" }}>
-            No templates yet.
-          </p>
-        )}
-        {dictionary.templates.map((t) => (
-          <TemplateRow key={t.id} template={t} />
+      <div className="flex flex-col gap-3">
+        {STAGES.map((s) => (
+          <div key={s.value} className="flex flex-col gap-2 sm:flex-row">
+            {LANGUAGES.map((l) => (
+              <div key={l.value} className="flex-1">
+                <StageLanguageSection
+                  dictionaryId={dictionary.id}
+                  stage={s.value}
+                  language={l.value}
+                  templates={dictionary.templates.filter(
+                    (t) => t.stage === s.value && t.language === l.value
+                  )}
+                />
+              </div>
+            ))}
+          </div>
         ))}
       </div>
-
-      <AddTemplateForm dictionaryId={dictionary.id} />
     </div>
   );
 }

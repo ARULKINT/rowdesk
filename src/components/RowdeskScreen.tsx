@@ -4,8 +4,17 @@ import { useMemo, useRef, useState } from "react";
 import styles from "./RowdeskScreen.module.css";
 import { extractDomain } from "@/lib/csv";
 import { composeMessage, composeMessageHtml } from "@/lib/templates";
+import type { OutreachStage } from "@/lib/queue";
+import type { OutreachLanguage, TemplatesByStage } from "@/lib/templateDictionary";
 
 export type RecordStatus = "pending" | "done" | "skipped";
+
+const STAGE_ORDER: OutreachStage[] = ["initial", "followup1", "followup2"];
+const STAGE_LABEL: Record<OutreachStage, string> = {
+  initial: "Initial",
+  followup1: "Follow-up 1",
+  followup2: "Follow-up 2",
+};
 
 export interface QueueRecordDTO {
   id: string;
@@ -18,6 +27,7 @@ export interface QueueRecordDTO {
   called: boolean;
   verified: boolean;
   status: RecordStatus;
+  outreachStage: OutreachStage;
   fileName: string;
   totalInFile: number;
 }
@@ -25,7 +35,7 @@ export interface QueueRecordDTO {
 interface RowdeskScreenProps {
   initialRecord: QueueRecordDTO | null;
   initialDoneToday: number;
-  templates: string[];
+  templatesByStage: TemplatesByStage;
 }
 
 async function patchRecord(id: string, body: Record<string, unknown>) {
@@ -38,7 +48,7 @@ async function patchRecord(id: string, body: Record<string, unknown>) {
   return res.json();
 }
 
-async function queueAction(recordId: string, action: "skip" | "done" | "next") {
+async function queueAction(recordId: string, action: "skip" | "done" | "next" | "advance") {
   const res = await fetch("/api/queue/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -72,32 +82,65 @@ async function claimNext() {
   return data.record as QueueRecordDTO | null;
 }
 
+interface MessageBoxState {
+  language: OutreachLanguage;
+  templateIndex: number;
+  copied: boolean;
+}
+
+const FRESH_BOX: MessageBoxState = { language: "english", templateIndex: 0, copied: false };
+
 export default function RowdeskScreen({
   initialRecord,
   initialDoneToday,
-  templates,
+  templatesByStage,
 }: RowdeskScreenProps) {
   const [record, setRecord] = useState<QueueRecordDTO | null>(initialRecord);
-  const [templateIndex, setTemplateIndex] = useState(0);
+  const [box1, setBox1] = useState<MessageBoxState>(FRESH_BOX);
+  const [box2, setBox2] = useState<MessageBoxState>(FRESH_BOX);
   const [doneToday, setDoneToday] = useState(initialDoneToday);
   const [toast, setToast] = useState<React.ReactNode>(null);
-  const [copyMsg, setCopyMsg] = useState("");
   const [phoneCopied, setPhoneCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phoneCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stage = record?.outreachStage ?? "initial";
+
+  // Every stage has its own pair of message slots — both boxes reset (fresh
+  // language, template pick, and copy state) whenever the stage or the
+  // record itself changes, so a stale "copied" flag never carries over and
+  // silently unlocks Done on an outreach message the agent hasn't sent yet.
+  // Adjusted during render (React's recommended pattern for resetting state
+  // on prop/derived-value change) rather than in an Effect, to avoid an
+  // extra commit-then-reset render pass.
+  const [boxResetKey, setBoxResetKey] = useState("");
+  const currentBoxKey = `${record?.id ?? ""}:${stage}`;
+  if (boxResetKey !== currentBoxKey) {
+    setBoxResetKey(currentBoxKey);
+    setBox1(FRESH_BOX);
+    setBox2(FRESH_BOX);
+  }
 
   const domain = useMemo(() => extractDomain(record?.websiteUrl ?? null), [record]);
   const composeValues = useMemo(
     () => ({ domain, name: record?.name ?? "" }),
     [domain, record]
   );
-  const template = templates[templateIndex] ?? templates[0] ?? "";
-  const composedHtml = useMemo(
-    () => composeMessageHtml(template, composeValues),
-    [template, composeValues]
-  );
+
+  const templates1 = templatesByStage[stage]?.[box1.language] ?? [];
+  const templates2 = templatesByStage[stage]?.[box2.language] ?? [];
+  const template1 = templates1[box1.templateIndex] ?? templates1[0] ?? "";
+  const template2 = templates2[box2.templateIndex] ?? templates2[0] ?? "";
+  const html1 = useMemo(() => composeMessageHtml(template1, composeValues), [template1, composeValues]);
+  const html2 = useMemo(() => composeMessageHtml(template2, composeValues), [template2, composeValues]);
+
+  // A box with no template configured for its stage/language can't block
+  // Done forever — treat "nothing to copy" as satisfied so a gap in the
+  // template library doesn't jam the whole queue.
+  const box1Ready = !template1 || box1.copied;
+  const box2Ready = !template2 || box2.copied;
+  const doneReady = box1Ready && box2Ready;
 
   function showToast(node: React.ReactNode) {
     setToast(node);
@@ -140,36 +183,40 @@ export default function RowdeskScreen({
     }
   }
 
-  function handlePrevTemplate() {
-    setTemplateIndex((i) => (i - 1 + templates.length) % templates.length);
+  function cycleTemplate(
+    setBox: React.Dispatch<React.SetStateAction<MessageBoxState>>,
+    count: number,
+    dir: 1 | -1
+  ) {
+    if (count === 0) return;
+    setBox((b) => ({ ...b, templateIndex: (b.templateIndex + dir + count) % count }));
   }
 
-  function handleNextTemplate() {
-    setTemplateIndex((i) => (i + 1) % templates.length);
-  }
-
-  async function handleCopy() {
+  async function handleCopyBox(
+    setBox: React.Dispatch<React.SetStateAction<MessageBoxState>>,
+    template: string
+  ) {
+    if (!template) return;
     const text = composeMessage(template, composeValues);
     try {
       await navigator.clipboard.writeText(text);
-      setCopyMsg("Copied!");
     } catch {
-      setCopyMsg("Select & Ctrl+C");
+      showToast("Couldn't copy — select & Ctrl+C");
     }
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopyMsg(""), 2600);
+    setBox((b) => ({ ...b, copied: true }));
   }
 
-  async function runAction(action: "skip" | "done" | "next") {
+  async function runAction(action: "skip" | "done" | "next" | "advance") {
     if (!record || busy) return;
+    if (action === "advance" && !doneReady) return;
     setBusy(true);
     const name = record.name;
-    setCopyMsg("");
+    const wasFinalStage = record.outreachStage === STAGE_ORDER[STAGE_ORDER.length - 1];
 
     try {
       const next = await queueAction(record.id, action);
 
-      if (action === "done") {
+      if (action === "done" || (action === "advance" && wasFinalStage)) {
         setDoneToday((d) => d + 1);
         const stamp = new Date().toLocaleTimeString([], {
           hour: "2-digit",
@@ -187,6 +234,13 @@ export default function RowdeskScreen({
             Skipped — <b>{name}</b>
           </>
         );
+      } else if (action === "advance") {
+        const nextLabel = STAGE_LABEL[STAGE_ORDER[STAGE_ORDER.indexOf(stage) + 1]];
+        showToast(
+          <>
+            Done — <b>{name}</b> · {nextLabel} in 3 days
+          </>
+        );
       }
 
       setRecord(next);
@@ -200,7 +254,6 @@ export default function RowdeskScreen({
   async function handlePrevious() {
     if (!record || busy) return;
     setBusy(true);
-    setCopyMsg("");
 
     try {
       const { record: next, moved, blockedReason } = await queuePrevious(record.id);
@@ -293,13 +346,18 @@ export default function RowdeskScreen({
       <div className={styles.card}>
         <div className={styles.cardHead}>
           <span className={styles.fileTag}>{record.fileName}</span>
-          <span className={styles.statusChip} data-status={record.status}>
-            {record.status === "done"
-              ? "Done"
-              : record.status === "skipped"
-              ? "Skipped"
-              : "Processing"}
-          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <span className={styles.statusChip} data-status={stage === "initial" ? "" : "followup"}>
+              {STAGE_LABEL[stage]}
+            </span>
+            <span className={styles.statusChip} data-status={record.status}>
+              {record.status === "done"
+                ? "Done"
+                : record.status === "skipped"
+                ? "Skipped"
+                : "Processing"}
+            </span>
+          </div>
         </div>
 
         <div className={`${styles.fieldRow} ${styles.split21}`}>
@@ -379,32 +437,32 @@ export default function RowdeskScreen({
           </div>
         </div>
 
-        <div className={styles.composer}>
-          <div className={styles.composerLabel}>Outreach message</div>
-          <p
-            className={styles.composerText}
-            dangerouslySetInnerHTML={{ __html: composedHtml }}
-          />
-          <div className={styles.composerControls}>
-            <div className={styles.templateCycle}>
-              <button type="button" aria-label="Previous template" onClick={handlePrevTemplate}>
-                ◁
-              </button>
-              <span className={styles.label}>
-                Template {templateIndex + 1} / {templates.length}
-              </span>
-              <button type="button" aria-label="Next template" onClick={handleNextTemplate}>
-                ▷
-              </button>
-            </div>
-            <div className={styles.copyStatus}>
-              <span className={styles.msg}>{copyMsg}</span>
-              <button type="button" className={styles.copyBtn} onClick={handleCopy}>
-                Copy message
-              </button>
-            </div>
-          </div>
-        </div>
+        <div className={styles.composerGroupLabel}>{STAGE_LABEL[stage]} outreach messages</div>
+
+        <MessageBox
+          label="Message 1"
+          box={box1}
+          setBox={setBox1}
+          templates={templates1}
+          template={template1}
+          html={html1}
+          stageLabel={STAGE_LABEL[stage]}
+          onCopy={() => handleCopyBox(setBox1, template1)}
+          onPrev={() => cycleTemplate(setBox1, templates1.length, -1)}
+          onNext={() => cycleTemplate(setBox1, templates1.length, 1)}
+        />
+        <MessageBox
+          label="Message 2"
+          box={box2}
+          setBox={setBox2}
+          templates={templates2}
+          template={template2}
+          html={html2}
+          stageLabel={STAGE_LABEL[stage]}
+          onCopy={() => handleCopyBox(setBox2, template2)}
+          onPrev={() => cycleTemplate(setBox2, templates2.length, -1)}
+          onNext={() => cycleTemplate(setBox2, templates2.length, 1)}
+        />
 
         <div className={styles.actions}>
           <button
@@ -426,10 +484,26 @@ export default function RowdeskScreen({
           <button
             type="button"
             className={styles.btnDone}
+            onClick={() => runAction("advance")}
+            disabled={busy || !doneReady}
+            title={
+              !doneReady
+                ? "Copy both outreach messages first"
+                : stage === "followup2"
+                ? "Marks this record fully done"
+                : `Schedules ${STAGE_LABEL[STAGE_ORDER[STAGE_ORDER.indexOf(stage) + 1]]} in 3 days`
+            }
+          >
+            {stage === "followup2" ? "Done — Complete" : "Done and Next Name"}
+          </button>
+          <button
+            type="button"
+            className={styles.btnSkip}
             onClick={() => runAction("done")}
             disabled={busy}
+            title="Marks this record fully done now and cancels any remaining follow-ups"
           >
-            Done and Next Name
+            Mark Converted
           </button>
           <button
             type="button"
@@ -450,6 +524,84 @@ export default function RowdeskScreen({
         Verified and Done states persist as you move through the queue. Records lock to you the
         moment they’re claimed.
       </footer>
+    </div>
+  );
+}
+
+function MessageBox({
+  label,
+  box,
+  setBox,
+  templates,
+  template,
+  html,
+  stageLabel,
+  onCopy,
+  onPrev,
+  onNext,
+}: {
+  label: string;
+  box: MessageBoxState;
+  setBox: React.Dispatch<React.SetStateAction<MessageBoxState>>;
+  templates: string[];
+  template: string;
+  html: string;
+  stageLabel: string;
+  onCopy: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className={styles.composer}>
+      <div className={styles.composerLabel}>{label}</div>
+      <div className={styles.langToggle} role="group" aria-label={`${label} language`}>
+        <button
+          type="button"
+          data-on={String(box.language === "english")}
+          onClick={() => setBox((b) => ({ ...b, language: "english", templateIndex: 0 }))}
+        >
+          English
+        </button>
+        <button
+          type="button"
+          data-on={String(box.language === "tamil")}
+          onClick={() => setBox((b) => ({ ...b, language: "tamil", templateIndex: 0 }))}
+        >
+          தமிழ்
+        </button>
+      </div>
+      {template ? (
+        <p className={styles.composerText} dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <p className={styles.composerText} style={{ color: "var(--ink-muted)" }}>
+          No {stageLabel.toLowerCase()} template in {box.language === "english" ? "English" : "Tamil"}{" "}
+          yet — add one in Admin → Templates.
+        </p>
+      )}
+      <div className={styles.composerControls}>
+        <div className={styles.templateCycle}>
+          <button type="button" aria-label={`Previous ${label} template`} onClick={onPrev} disabled={templates.length < 2}>
+            ◁
+          </button>
+          <span className={styles.label}>
+            Template {templates.length === 0 ? 0 : box.templateIndex + 1} / {templates.length}
+          </span>
+          <button type="button" aria-label={`Next ${label} template`} onClick={onNext} disabled={templates.length < 2}>
+            ▷
+          </button>
+        </div>
+        <div className={styles.copyStatus}>
+          <button
+            type="button"
+            className={styles.copyBtn}
+            data-on={String(box.copied)}
+            onClick={onCopy}
+            disabled={!template}
+          >
+            {box.copied ? "Copied ✓" : "Copy message"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

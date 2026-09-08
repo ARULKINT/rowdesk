@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiUser } from "@/lib/auth";
 import {
+  advanceStage,
   claimNextRecordForUser,
   claimPreviousInFile,
   completeRecord,
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
 
     if (action === "skip") await skipRecord(recordId, user.id);
     else if (action === "done") await completeRecord(recordId, user.id);
+    else if (action === "advance") await advanceStage(recordId, user.id);
     else await releaseRecord(recordId, user.id);
   } catch (err) {
     if (err instanceof OwnershipError) {

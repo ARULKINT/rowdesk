@@ -116,6 +116,12 @@ model Record {
 
   status String @default("pending") // pending | done | skipped
 
+  // Outreach sequence: initial -> followup1 -> followup2, each stage gated by
+  // a 3-day wait after the previous one was sent. stageDueAt null means the
+  // record is due now; findCandidate() hides it from the queue until then.
+  outreachStage String    @default("initial") // initial | followup1 | followup2
+  stageDueAt    DateTime?
+
   claimedById String?
   claimedBy   User?     @relation("ClaimedRecords", fields: [claimedById], references: [id])
   claimedAt   DateTime?
@@ -133,6 +139,7 @@ model Record {
   @@index([sourceFileId, rowIndex])
   @@index([status, claimedById])
   @@index([claimedAt])
+  @@index([stageDueAt])
 }
 
 model TemplateDictionary {
@@ -154,6 +161,12 @@ model Template {
   position Int
   status   String @default("active") // active | retired
 
+  // Which point in the outreach sequence this template belongs to, and in
+  // which language. Existing rows default to initial/english, preserving
+  // today's single-stage English behavior unchanged.
+  stage    String @default("initial")  // initial | followup1 | followup2
+  language String @default("english")  // english | tamil
+
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id])
 
@@ -161,6 +174,7 @@ model Template {
   updatedAt DateTime @updatedAt
 
   @@index([dictionaryId, position])
+  @@index([dictionaryId, stage, language])
 }
 
 model AuditLog {

@@ -18,6 +18,8 @@ export default async function AdminTemplatesPage() {
       body: t.body,
       position: t.position,
       status: t.status as "active" | "retired",
+      stage: t.stage as "initial" | "followup1" | "followup2",
+      language: t.language as "english" | "tamil",
     })),
   }));
 
@@ -30,8 +32,9 @@ export default async function AdminTemplatesPage() {
         Template Dictionaries
       </h1>
       <p className="mb-5 text-[0.85rem]" style={{ color: "var(--ink-muted)" }}>
-        The active dictionary’s active templates populate the outreach composer on the Dashboard.
-        Only one dictionary can be active at a time.
+        The active dictionary’s active templates populate the outreach composer on the Dashboard,
+        grouped by stage (Initial → Follow-up 1 → Follow-up 2, 3 days apart) and language
+        (English / Tamil). Only one dictionary can be active at a time.
       </p>
       <DictionariesPanel initialDictionaries={data} />
     </div>

@@ -7,6 +7,7 @@ export type AuditAction =
   | "logout"
   | "record_claimed"
   | "record_completed"
+  | "record_stage_advanced"
   | "record_skipped"
   | "record_released"
   | "user_created"

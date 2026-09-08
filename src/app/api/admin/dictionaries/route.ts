@@ -35,6 +35,8 @@ export async function POST(request: Request) {
             create: STARTER_TEMPLATES.map((body, i) => ({
               body,
               position: i,
+              stage: "initial",
+              language: "english",
               createdById: admin.id,
             })),
           }

@@ -133,6 +133,10 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+.statusChip[data-status="followup"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 
 .fieldRow {
   display: grid;
@@ -325,12 +329,49 @@
   margin-bottom: 8px;
 }
 
+.composerGroupLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 6px 2px 10px;
+}
+
 .composerText {
   font-size: 0.96rem;
   line-height: 1.6;
   margin: 0 0 14px;
   text-wrap: pretty;
   white-space: pre-wrap;
+}
+
+.langToggle {
+  display: inline-flex;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.langToggle button {
+  border: none;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-family: var(--font-body-stack);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.langToggle button:not(:first-child) {
+  border-left: 2px solid var(--border);
+}
+
+.langToggle button[data-on="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .composerText mark {
@@ -398,13 +439,6 @@
   gap: 10px;
 }
 
-.copyStatus .msg {
-  font-family: var(--font-data-stack);
-  font-size: 0.76rem;
-  color: var(--success);
-  min-width: 70px;
-}
-
 .copyBtn {
   border: 2px solid var(--border);
   border-radius: 8px;
@@ -421,10 +455,21 @@
   background: var(--chip);
 }
 
+.copyBtn[data-on="true"] {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.copyBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ---- action bar ---- */
 .actions {
   display: grid;
-  grid-template-columns: 0.85fr 0.85fr 1.6fr 0.85fr;
+  grid-template-columns: 0.85fr 0.85fr 1.3fr 1.3fr 0.85fr;
   gap: 10px;
   margin-top: 18px;
 }
@@ -462,6 +507,7 @@
 .btnDone:hover {
   filter: brightness(1.06);
 }
+
 .btnDone:disabled,
 .btnSkip:disabled,
 .btnNext:disabled {

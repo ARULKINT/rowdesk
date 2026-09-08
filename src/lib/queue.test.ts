@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./prisma";
 import {
+  advanceStage,
   claimNextRecordForUser,
   claimPreviousInFile,
   completeRecord,
@@ -152,6 +153,90 @@ describe("completeRecord", () => {
     const record = await prisma.record.findUnique({ where: { id: claimed!.id } });
     expect(record!.status).toBe("done");
     expect(record!.doneById).toBe(userA.id);
+  });
+});
+
+describe("advanceStage", () => {
+  it("moves initial -> followup1, schedules it 3 days out, and releases the claim", async () => {
+    await createFileWithRecords(1);
+    const user = await createUser("user1");
+    const claimed = await claimNextRecordForUser(user.id);
+
+    const before = Date.now();
+    const updated = await advanceStage(claimed!.id, user.id);
+    const after = Date.now();
+
+    expect(updated.outreachStage).toBe("followup1");
+    expect(updated.claimedById).toBeNull();
+    expect(updated.status).toBe("pending");
+    expect(updated.stageDueAt).not.toBeNull();
+    const dueAtMs = updated.stageDueAt!.getTime();
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    expect(dueAtMs).toBeGreaterThanOrEqual(before + threeDaysMs - 1000);
+    expect(dueAtMs).toBeLessThanOrEqual(after + threeDaysMs + 1000);
+  });
+
+  it("hides a record from the queue until its stageDueAt passes, then makes it available again", async () => {
+    await createFileWithRecords(1);
+    const userA = await createUser("userA");
+    const userB = await createUser("userB");
+
+    const claimed = await claimNextRecordForUser(userA.id);
+    await advanceStage(claimed!.id, userA.id);
+
+    const tooSoon = await claimNextRecordForUser(userB.id);
+    expect(tooSoon).toBeNull();
+
+    await prisma.record.update({
+      where: { id: claimed!.id },
+      data: { stageDueAt: new Date(Date.now() - 1000) },
+    });
+
+    const nowDue = await claimNextRecordForUser(userB.id);
+    expect(nowDue!.id).toBe(claimed!.id);
+    expect(nowDue!.outreachStage).toBe("followup1");
+  });
+
+  it("advances followup1 -> followup2 the same way", async () => {
+    await createFileWithRecords(1);
+    const user = await createUser("user1");
+    const claimed = await claimNextRecordForUser(user.id);
+    await prisma.record.update({
+      where: { id: claimed!.id },
+      data: { outreachStage: "followup1" },
+    });
+
+    const updated = await advanceStage(claimed!.id, user.id);
+    expect(updated.outreachStage).toBe("followup2");
+    expect(updated.status).toBe("pending");
+  });
+
+  it("completes the record when advancing past the final stage (followup2)", async () => {
+    await createFileWithRecords(1);
+    const userA = await createUser("userA");
+    const userB = await createUser("userB");
+    const claimed = await claimNextRecordForUser(userA.id);
+    await prisma.record.update({
+      where: { id: claimed!.id },
+      data: { outreachStage: "followup2" },
+    });
+
+    const updated = await advanceStage(claimed!.id, userA.id);
+    expect(updated.status).toBe("done");
+    expect(updated.doneById).toBe(userA.id);
+    expect(updated.outreachStage).toBe("finished");
+
+    const next = await claimNextRecordForUser(userB.id);
+    expect(next).toBeNull();
+  });
+
+  it("rejects advancing a record the caller doesn't hold the claim on", async () => {
+    await createFileWithRecords(1);
+    const userA = await createUser("userA");
+    const userB = await createUser("userB");
+    const claimed = await claimNextRecordForUser(userA.id);
+
+    await expect(advanceStage(claimed!.id, userB.id)).rejects.toThrow(OwnershipError);
   });
 });
 

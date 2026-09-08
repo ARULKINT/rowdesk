@@ -27,6 +27,17 @@ export async function attachPosition(
  */
 const AVAILABLE_STATUSES = ["pending", "skipped"];
 
+/** Ordered outreach stages; a record advances one slot at a time. */
+export const OUTREACH_STAGES = ["initial", "followup1", "followup2"] as const;
+export type OutreachStage = (typeof OUTREACH_STAGES)[number];
+
+const STAGE_WAIT_DAYS = 3;
+
+/** Records whose stageDueAt is unset or already past are eligible now. */
+function dueNow() {
+  return { OR: [{ stageDueAt: null }, { stageDueAt: { lte: new Date() } }] };
+}
+
 async function releaseStaleClaims(): Promise<void> {
   const settings = await getSettings();
   const cutoff = new Date(Date.now() - settings.claimTimeoutMinutes * 60 * 1000);
@@ -76,13 +87,23 @@ async function releaseStaleClaims(): Promise<void> {
 async function findCandidate(excludeIds: string[]) {
   const notIn = excludeIds.length ? { notIn: excludeIds } : undefined;
   const pending = await prisma.record.findFirst({
-    where: { status: "pending", claimedById: null, ...(notIn ? { id: notIn } : {}) },
+    where: {
+      status: "pending",
+      claimedById: null,
+      ...dueNow(),
+      ...(notIn ? { id: notIn } : {}),
+    },
     orderBy: [{ sourceFileId: "asc" }, { rowIndex: "asc" }],
   });
   if (pending) return pending;
 
   return prisma.record.findFirst({
-    where: { status: "skipped", claimedById: null, ...(notIn ? { id: notIn } : {}) },
+    where: {
+      status: "skipped",
+      claimedById: null,
+      ...dueNow(),
+      ...(notIn ? { id: notIn } : {}),
+    },
     orderBy: [{ updatedAt: "asc" }, { rowIndex: "asc" }],
   });
 }
@@ -196,6 +217,53 @@ export async function completeRecord(recordId: string, userId: string) {
     action: "record_completed",
     entityType: "Record",
     entityId: recordId,
+  });
+  return updated;
+}
+
+/**
+ * Marks the current outreach stage's message as sent. Before the final
+ * stage (followup2), this schedules the next stage 3 days out and returns
+ * the record to the shared pool (not claimable again until due). Sending
+ * followup2 finishes the sequence — same end state as completeRecord.
+ */
+export async function advanceStage(recordId: string, userId: string) {
+  const record = await assertOwnership(recordId, userId);
+  const idx = OUTREACH_STAGES.indexOf(record.outreachStage as OutreachStage);
+  const isFinalStage = idx === -1 || idx === OUTREACH_STAGES.length - 1;
+
+  if (isFinalStage) {
+    const updated = await prisma.record.update({
+      where: { id: recordId },
+      data: { status: "done", outreachStage: "finished", doneById: userId, doneAt: new Date() },
+    });
+    await logAudit({
+      userId,
+      action: "record_completed",
+      entityType: "Record",
+      entityId: recordId,
+      metadata: { via: "stage_advance", stage: record.outreachStage },
+    });
+    return updated;
+  }
+
+  const nextStage = OUTREACH_STAGES[idx + 1];
+  const dueAt = new Date(Date.now() + STAGE_WAIT_DAYS * 24 * 60 * 60 * 1000);
+  const updated = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      outreachStage: nextStage,
+      stageDueAt: dueAt,
+      claimedById: null,
+      claimedAt: null,
+    },
+  });
+  await logAudit({
+    userId,
+    action: "record_stage_advanced",
+    entityType: "Record",
+    entityId: recordId,
+    metadata: { fromStage: record.outreachStage, toStage: nextStage, dueAt: dueAt.toISOString() },
   });
   return updated;
 }
