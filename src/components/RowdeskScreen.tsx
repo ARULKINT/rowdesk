@@ -83,12 +83,11 @@ async function claimNext() {
 }
 
 interface MessageBoxState {
-  language: OutreachLanguage;
   templateIndex: number;
   copied: boolean;
 }
 
-const FRESH_BOX: MessageBoxState = { language: "english", templateIndex: 0, copied: false };
+const FRESH_BOX: MessageBoxState = { templateIndex: 0, copied: false };
 
 export default function RowdeskScreen({
   initialRecord,
@@ -128,8 +127,8 @@ export default function RowdeskScreen({
     [domain, record]
   );
 
-  const templates1 = templatesByStage[stage]?.[box1.language] ?? [];
-  const templates2 = templatesByStage[stage]?.[box2.language] ?? [];
+  const templates1 = templatesByStage[stage]?.english ?? [];
+  const templates2 = templatesByStage[stage]?.tamil ?? [];
   const template1 = templates1[box1.templateIndex] ?? templates1[0] ?? "";
   const template2 = templates2[box2.templateIndex] ?? templates2[0] ?? "";
   const html1 = useMemo(() => composeMessageHtml(template1, composeValues), [template1, composeValues]);
@@ -441,8 +440,8 @@ export default function RowdeskScreen({
 
         <MessageBox
           label="Message 1"
+          language="english"
           box={box1}
-          setBox={setBox1}
           templates={templates1}
           template={template1}
           html={html1}
@@ -453,8 +452,8 @@ export default function RowdeskScreen({
         />
         <MessageBox
           label="Message 2"
+          language="tamil"
           box={box2}
-          setBox={setBox2}
           templates={templates2}
           template={template2}
           html={html2}
@@ -530,8 +529,8 @@ export default function RowdeskScreen({
 
 function MessageBox({
   label,
+  language,
   box,
-  setBox,
   templates,
   template,
   html,
@@ -541,8 +540,8 @@ function MessageBox({
   onNext,
 }: {
   label: string;
+  language: OutreachLanguage;
   box: MessageBoxState;
-  setBox: React.Dispatch<React.SetStateAction<MessageBoxState>>;
   templates: string[];
   template: string;
   html: string;
@@ -551,31 +550,18 @@ function MessageBox({
   onPrev: () => void;
   onNext: () => void;
 }) {
+  const languageLabel = language === "english" ? "English" : "தமிழ் Tamil";
   return (
     <div className={styles.composer}>
-      <div className={styles.composerLabel}>{label}</div>
-      <div className={styles.langToggle} role="group" aria-label={`${label} language`}>
-        <button
-          type="button"
-          data-on={String(box.language === "english")}
-          onClick={() => setBox((b) => ({ ...b, language: "english", templateIndex: 0 }))}
-        >
-          English
-        </button>
-        <button
-          type="button"
-          data-on={String(box.language === "tamil")}
-          onClick={() => setBox((b) => ({ ...b, language: "tamil", templateIndex: 0 }))}
-        >
-          தமிழ்
-        </button>
+      <div className={styles.composerLabel}>
+        {label} <span className={styles.langBadge}>{languageLabel}</span>
       </div>
       {template ? (
         <p className={styles.composerText} dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
         <p className={styles.composerText} style={{ color: "var(--ink-muted)" }}>
-          No {stageLabel.toLowerCase()} template in {box.language === "english" ? "English" : "Tamil"}{" "}
-          yet — add one in Admin → Templates.
+          No {stageLabel.toLowerCase()} template in {language === "english" ? "English" : "Tamil"} yet
+          — add one in Admin → Templates.
         </p>
       )}
       <div className={styles.composerControls}>

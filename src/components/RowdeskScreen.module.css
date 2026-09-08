@@ -346,32 +346,18 @@
   white-space: pre-wrap;
 }
 
-.langToggle {
-  display: inline-flex;
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.langToggle button {
-  border: none;
-  background: var(--surface);
+.langBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--chip);
   color: var(--ink-muted);
-  font-family: var(--font-body-stack);
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-
-.langToggle button:not(:first-child) {
-  border-left: 2px solid var(--border);
-}
-
-.langToggle button[data-on="true"] {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  text-transform: none;
+  letter-spacing: 0;
+  vertical-align: middle;
 }
 
 .composerText mark {
