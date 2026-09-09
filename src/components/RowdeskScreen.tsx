@@ -48,7 +48,7 @@ async function patchRecord(id: string, body: Record<string, unknown>) {
   return res.json();
 }
 
-async function queueAction(recordId: string, action: "next" | "advance") {
+async function queueAction(recordId: string, action: "next" | "advance" | "skip") {
   const res = await fetch("/api/queue/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -205,7 +205,7 @@ export default function RowdeskScreen({
     setBox((b) => ({ ...b, copied: true }));
   }
 
-  async function runAction(action: "next" | "advance") {
+  async function runAction(action: "next" | "advance" | "skip") {
     if (!record || busy) return;
     if (action === "advance" && !doneReady) return;
     setBusy(true);
@@ -232,6 +232,12 @@ export default function RowdeskScreen({
         showToast(
           <>
             Done — <b>{name}</b> · {nextLabel} in 3 days
+          </>
+        );
+      } else if (action === "skip") {
+        showToast(
+          <>
+            Skipped — <b>{name}</b>
           </>
         );
       }
@@ -465,6 +471,15 @@ export default function RowdeskScreen({
             disabled={busy || record.rowIndex === 0}
           >
             Previous
+          </button>
+          <button
+            type="button"
+            className={styles.btnNext}
+            onClick={() => runAction("skip")}
+            disabled={busy}
+            title="Send this record back to the shared queue for anyone to pick up later"
+          >
+            Skip
           </button>
           <button
             type="button"
