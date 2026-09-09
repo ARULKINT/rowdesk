@@ -1,6 +1,8 @@
 # Rowdesk
 
-An internal tool for cleaning and enriching scraped business-listing data (Google Maps exports) and sending domain-protection outreach. Multiple team members pull records from a shared, locked queue one at a time; an admin manages users, source files, templates, and Google Drive ingestion, and can see stats and a full audit trail.
+An internal tool for cleaning and enriching scraped business-listing data (Google Maps exports) and running a 3-stage, bilingual (English + Tamil) domain-protection outreach sequence against it. Multiple team members pull records from a shared, locked queue one at a time; an admin manages users, source files, templates, and Google Drive ingestion, and can see stats and a full audit trail.
+
+See [`docs/PROJECT_DOCUMENTATION.md`](docs/PROJECT_DOCUMENTATION.md) for the complete single-file technical reference (architecture, database schema, every API route, business logic, security, testing, deployment). This README stays a shorter quick-start.
 
 ## Architecture
 
@@ -8,6 +10,7 @@ An internal tool for cleaning and enriching scraped business-listing data (Googl
 - **Prisma ORM over PostgreSQL** — there is no local database. Local dev, tests, and production all point at Postgres (see [Database](#database)); local dev normally points at the same production database via `.env.local`.
 - **Session auth**: bcrypt-hashed passwords, an httpOnly session cookie backed by a `Session` table (no third-party auth provider). Every route is authorized server-side — `requireUser()` / `requireAdmin()` in Server Components, a `getApiUser()` check at the top of every mutating Route Handler.
 - **Locked shared queue**: visiting `/dashboard` atomically claims the next available record via a compare-and-swap `updateMany` with a retry loop (`src/lib/queue.ts`) — portable to Postgres without raw `SELECT FOR UPDATE`. Stale claims self-heal on the next claim attempt (configurable timeout in Admin → Settings).
+- **3-stage bilingual outreach sequence**: each record moves `initial → followup1 → followup2`, 3 days apart (`stageDueAt` gating, `src/lib/queue.ts`'s `advanceStage()`). The dashboard always shows two message boxes per stage — English and Tamil, no language toggle — pulled from the active Template Dictionary for that exact `(stage, language)` slot; "Done and Next Name" is disabled until both have been copied.
 - **Google Drive ingestion**: OAuth2 (read-only `drive.readonly` scope) via `googleapis`, tokens encrypted at rest (AES-256-GCM). Scanning a configured folder classifies each CSV as New/Updated/Unchanged by comparing Drive's `modifiedTime` to the last version we successfully processed; each processed file becomes a **new** `SourceFile` version rather than overwriting the old one, so already-claimed/completed records are never touched.
 - **Design tokens**: the color system is CSS custom properties (`src/app/globals.css`), not Tailwind's palette — Tailwind is used for layout/spacing utilities only. Typography: Libre Franklin (display), IBM Plex Sans (UI), IBM Plex Mono (data/counters).
 
@@ -65,15 +68,15 @@ The **source folder is fixed via `GOOGLE_DRIVE_FOLDER_ID`**, not admin-editable 
 
 ## CSV format
 
-Expected columns (flexible naming — see `src/lib/csv.ts` for the full alias list): `name`, `phone`, `rating`, `maps_url`, `website_url`. Column detection is case/spacing/underscore-insensitive (`"Business Name"`, `business_name`, `businessname` all match).
+Expected columns (flexible naming — see `src/lib/csv.ts` for the full alias list): `name`, `phone`, `rating`, `maps_url`, `website_url`. Column detection is case/spacing/underscore-insensitive (`"Business Name"`, `business_name`, `businessname` all match). Admin → Import accepts **multiple files in one upload**, processed sequentially, each with its own cleaning summary.
 
-Cleaning rules: rows missing **Name or Phone are removed** from the dataset (both are required columns *and* required per-row values). Missing Rating, Maps URL, or Website are kept and reported as data-quality stats — they don't cause removal.
+Cleaning rules: rows missing **Name or Phone are removed** from the dataset (both are required columns *and* required per-row values). A phone number is normalized to a 10-digit Indian mobile number (country code / trunk-zero stripped as appropriate); numbers that don't reduce to a valid `6`–`9`-leading mobile number — landlines, STD-code numbers, garbage-length scrape noise, or an already-10-digit number starting `0` — are **rejected**, not guessed at (see `normalizePhone()` in `src/lib/csv.ts`). Missing Rating, Maps URL, or Website are kept and reported as data-quality stats — they don't cause removal.
 
 ## Queue behavior
 
 One record at a time, locked to whoever claims it:
-- **Claim**: visiting `/dashboard` atomically claims the next available (`pending` or previously-`skipped`, unclaimed) record, ordered by source file then row — fresh `pending` records are preferred over `skipped` ones so a user skipping through the queue makes forward progress instead of cycling back to what they just skipped.
-- **Done**: permanently locks the record (`status=done`, `doneBy`, `doneAt`) — it can never be claimed again.
+- **Claim**: visiting `/dashboard` atomically claims the next available (`pending` or previously-`skipped`, unclaimed, and "due now" — see outreach sequence below) record, ordered by source file then row — fresh `pending` records are preferred over `skipped` ones so a user skipping through the queue makes forward progress instead of cycling back to what they just skipped.
+- **Done and Next Name** (the `advance` action): marks the current outreach stage's messages as sent. Before the final stage, this schedules the next stage 3 days out and returns the record to the pool (invisible to the queue until due); on the final stage (`followup2`) it instead permanently completes the record (`status=done`, `doneBy`, `doneAt`) — it can never be claimed again. Disabled until both message boxes for the current stage have been copied at least once.
 - **Skip**: releases the claim and marks the record `skipped`; it re-enters the shared pool for anyone (including the same user later) to pick up.
 - **Next**: releases the claim without changing status, then claims the next available record as usual.
 - **Previous**: steps back to the previous row (by row position) *in the same source file* and claims it, releasing the current claim without changing its status. This is a deliberate exception to the normal "only claim what's available" rule — it steals the claim from whoever currently holds that row, if anyone, so you can quickly correct the last record or two. The one thing it won't do is step back into a `done` row, since done stays permanently locked; disabled entirely on row 1 of a file.
@@ -82,13 +85,13 @@ One record at a time, locked to whoever claims it:
 ## Testing
 
 ```bash
-npm test        # vitest run — 37 tests as of Phase 4
+npm test        # vitest run
 npx tsc --noEmit
 npm run lint
 npm run build
 ```
 
-There is no local/disposable database, so the database-backed tests (`auth.test.ts`, `queue.test.ts` — password hashing, session resolution, queue claim/skip/done/ownership/stale-release/concurrency) only run when `TEST_DATABASE_URL` is set, pointing at a disposable Postgres database (e.g. a separate Neon branch — never production, since these tests freely delete rows):
+Without `TEST_DATABASE_URL` set, `npm test` runs 5 of 7 test files (55 tests) and skips the 2 database-backed ones. There is no local/disposable database, so the database-backed tests (`auth.test.ts`, `queue.test.ts` — password hashing, session resolution, queue claim/skip/done/ownership/stale-release/concurrency/outreach-stage-advance) only run when `TEST_DATABASE_URL` is set, pointing at a disposable Postgres database (e.g. a separate Neon branch — never production, since these tests freely delete rows), bringing the full suite to 84 tests:
 
 ```bash
 TEST_DATABASE_URL="<postgres-url>" npm test
@@ -114,6 +117,6 @@ If using Google Drive: update `GOOGLE_REDIRECT_URI` to the production URL and ad
 
 ## Admin usage
 
-Admin nav: **Dashboard** (same locked-queue screen as everyone), **Statistics** (org-wide, filterable by date range/user/source file), **Users** (create/edit/disable/enable/role/reset password), **Google Drive** (connect, scan, process), **Processing Queue** (live counts, source files, currently-claimed and recently-completed tables, CSV export of processed records), **Template Dictionaries** (manage the outreach message templates the Dashboard composer pulls from — exactly one dictionary is "active" at a time), **Audit Log** (every login/claim/done/skip/user/template/settings/Drive action, searchable and filterable), **Settings** (claim-lock timeout, timezone).
+Admin nav: **Dashboard** (same locked-queue screen as everyone), **Statistics** (org-wide, filterable by date range/user/source file, includes a per-stage pending/in-process/completed breakdown of the outreach sequence), **Users** (create/edit/disable/enable/role/reset password), **Google Drive** (connect, scan, process), **Processing Queue** (live counts, source files, currently-claimed and recently-completed tables, CSV export of processed records), **Template Dictionaries** (manage the outreach message templates the Dashboard composer pulls from, organized by stage × language; exactly one dictionary is "active" at a time), **Audit Log** (every login/claim/done/skip/stage-advance/user/template/settings/Drive action, searchable and filterable), **Settings** (claim-lock timeout, timezone).
 
-To create your first real admin (rather than using the seeded dev one), have an existing admin create the user from Admin → Users with role `ADMIN`, or insert one directly via `npm run db:seed` logic as a reference for the fields required.
+There is no seed script in this repo. To create the very first admin account, insert a `User` row directly (e.g. via `npx prisma studio`, with a bcrypt hash of the password at cost 12 — see `hashPassword()` in `src/lib/auth.ts`). Every subsequent user, admin or otherwise, can then be created normally from Admin → Users.
