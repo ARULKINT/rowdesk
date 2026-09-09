@@ -38,7 +38,7 @@
 | **Server Component** | A React component that renders on the server and can query the database directly, with no client-side JavaScript required for its own rendering |
 | **SSR** | Server-Side Rendering |
 | **Prisma Client** | The generated, type-safe database query API produced from `schema.prisma` |
-| **Migration** | A versioned, applied SQL change to the database schema, tracked by Prisma in `prisma/migrations/` (SQLite) and `prisma/postgres/migrations/` (PostgreSQL) |
+| **Migration** | A versioned, applied SQL change to the database schema, tracked by Prisma in `prisma/migrations/` (PostgreSQL — the only database) |
 | **cuid** | Collision-resistant unique identifier — the ID format used for every primary key in this schema (Prisma's `@default(cuid())`) |
 | **Zod** | The TypeScript-first schema validation library used for every API request body |
 | **CI/CD** | Continuous Integration / Continuous Deployment — not currently automated in this project (see [18-deployment.md](18-deployment.md)) |

@@ -31,7 +31,12 @@ async function createFileWithRecords(n: number) {
   return file;
 }
 
+// Needs a real (disposable) database — see vitest.setup.ts. Never runs
+// against production: these tests delete every row in these tables.
+const DB_AVAILABLE = Boolean(process.env.VITEST_DB_AVAILABLE);
+
 beforeEach(async () => {
+  if (!DB_AVAILABLE) return;
   await prisma.auditLog.deleteMany();
   await prisma.record.deleteMany();
   await prisma.sourceFile.deleteMany();
@@ -40,7 +45,7 @@ beforeEach(async () => {
   await prisma.systemSetting.deleteMany();
 });
 
-describe("claimNextRecordForUser", () => {
+describe.skipIf(!DB_AVAILABLE)("claimNextRecordForUser", () => {
   it("never assigns the same record to two concurrently-claiming users", async () => {
     await createFileWithRecords(5);
     const userA = await createUser("userA");
@@ -73,7 +78,7 @@ describe("claimNextRecordForUser", () => {
   });
 });
 
-describe("skipRecord", () => {
+describe.skipIf(!DB_AVAILABLE)("skipRecord", () => {
   it("returns the record to the pool, visibly marked skipped, for another user to claim", async () => {
     await createFileWithRecords(1);
     const userA = await createUser("userA");
@@ -138,7 +143,7 @@ describe("skipRecord", () => {
   });
 });
 
-describe("completeRecord", () => {
+describe.skipIf(!DB_AVAILABLE)("completeRecord", () => {
   it("permanently locks the record — it can never be assigned again", async () => {
     await createFileWithRecords(1);
     const userA = await createUser("userA");
@@ -156,7 +161,7 @@ describe("completeRecord", () => {
   });
 });
 
-describe("advanceStage", () => {
+describe.skipIf(!DB_AVAILABLE)("advanceStage", () => {
   it("moves initial -> followup1, schedules it 3 days out, and releases the claim", async () => {
     await createFileWithRecords(1);
     const user = await createUser("user1");
@@ -240,7 +245,7 @@ describe("advanceStage", () => {
   });
 });
 
-describe("ownership enforcement", () => {
+describe.skipIf(!DB_AVAILABLE)("ownership enforcement", () => {
   it("rejects done/skip/release from a user who doesn't hold the claim", async () => {
     await createFileWithRecords(1);
     const userA = await createUser("userA");
@@ -254,7 +259,7 @@ describe("ownership enforcement", () => {
   });
 });
 
-describe("claimPreviousInFile", () => {
+describe.skipIf(!DB_AVAILABLE)("claimPreviousInFile", () => {
   it("steps back to the previous row and claims it, releasing the current claim without changing its status", async () => {
     const file = await createFileWithRecords(3);
     const user = await createUser("user1");
@@ -356,7 +361,7 @@ describe("claimPreviousInFile", () => {
   });
 });
 
-describe("stale claim release", () => {
+describe.skipIf(!DB_AVAILABLE)("stale claim release", () => {
   it("returns a claim to the pool once it exceeds the configured timeout", async () => {
     await createFileWithRecords(1);
     const userA = await createUser("userA");

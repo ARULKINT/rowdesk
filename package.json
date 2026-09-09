@@ -7,9 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:sync-postgres-schema": "node scripts/sync-postgres-schema.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

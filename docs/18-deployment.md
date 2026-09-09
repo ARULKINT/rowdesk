@@ -4,54 +4,40 @@
 
 | Environment | Database | How it's run |
 |---|---|---|
-| Local development | SQLite (`prisma/dev.db`) | `npm run dev` (Next.js dev server, Turbopack) |
-| Test | SQLite (`prisma/test.db`, ephemeral) | `npm test` (created/migrated fresh every run, see [17-testing.md](17-testing.md)) |
+| Local development | The same Neon Postgres database production uses, via `DATABASE_URL` in `.env.local` | `npm run dev` (Next.js dev server, Turbopack) |
+| Test | None by default — database-backed tests skip themselves. A disposable Postgres database (e.g. a separate Neon branch) when `TEST_DATABASE_URL` is set | `npm test`, or `TEST_DATABASE_URL="<url>" npm test` for the full suite (see [17-testing.md](17-testing.md)) |
 | Production | PostgreSQL (Neon, serverless) | Vercel — `crm-fx2` project, deployed from the `master` branch of `github.com/ARULKINT/rowdesk` |
 
-There is no separate staging environment in this deployment — Vercel does implicitly create **preview** deployments for non-production branches/PRs (each with its own Neon branch, per the marketplace integration's behavior), but none is actively used as a persistent staging environment today.
+There is no separate staging environment in this deployment — Vercel does implicitly create **preview** deployments for non-production branches/PRs (each with its own Neon branch, per the marketplace integration's behavior), but none is actively used as a persistent staging environment today. There is also no local/SQLite database of any kind — local development intentionally points at the real production database, so schema and data changes made locally are immediately real.
 
-## 2. Why Two Prisma Schemas
+## 2. One Postgres Schema, One Migration History
 
-Prisma's `datasource.provider` is a static string, and migration `.sql` files are provider-specific — SQLite and PostgreSQL SQL are not interchangeable. Rather than forcing local development onto Postgres (requiring Docker or a hosted dev database just to run the app), the project maintains **two mechanically-synced schema files**:
-
-- `prisma/schema.prisma` — **source of truth**, SQLite, edited directly. Backs local dev and the test suite.
-- `prisma/postgres/schema.prisma` — **generated**, PostgreSQL, produced by `scripts/sync-postgres-schema.mjs` (a regex swap of only the `datasource { }` block; every model definition is copied verbatim). Backs production only. Never hand-edited.
-
-Each has its own independent migration history (`prisma/migrations/` vs `prisma/postgres/migrations/`).
+`prisma/schema.prisma` is the only schema, `prisma/migrations/` the only migration history, used identically by local dev, tests, and production. `prisma.config.ts` loads `.env` then `.env.local` (with override) before every Prisma CLI command, matching Next.js's own env-file precedence — so `next dev`, `prisma migrate dev`, `prisma studio`, etc. all resolve `DATABASE_URL` to the same database without needing a `--schema` flag or manual env overrides.
 
 ### Adding a schema change (developer workflow)
 
 ```bash
-# 1. Edit prisma/schema.prisma, then:
-npx prisma migrate dev --name <change>              # SQLite — as usual
-
-# 2. Regenerate the Postgres mirror:
-npm run db:sync-postgres-schema
-
-# 3. Generate the matching Postgres migration against a real reachable
-#    Postgres URL (a Neon branch, local Postgres, whatever's available):
-DATABASE_URL="<postgres-url>" npx prisma migrate dev \
-  --schema prisma/postgres/schema.prisma --name <change>
+npx prisma migrate dev --name <change>
 ```
 
-Step 3 needs a real, reachable Postgres connection because `migrate dev` computes and applies the diff interactively — there is no purely offline way to generate a Postgres migration file.
+This computes and applies the migration against whatever `DATABASE_URL` currently resolves to — normally the real database, since there's nothing else to point it at. Review the generated `.sql` before running this against data you care about.
 
 ## 3. Build & Deploy Pipeline
 
 `vercel.json`:
 ```json
 {
-  "buildCommand": "prisma generate --schema prisma/postgres/schema.prisma && prisma migrate deploy --schema prisma/postgres/schema.prisma && next build"
+  "buildCommand": "prisma generate --schema prisma/schema.prisma && prisma migrate deploy --schema prisma/schema.prisma && next build"
 }
 ```
 
-Every Vercel build therefore, in order: (1) generates a fresh Postgres-flavored Prisma Client, (2) runs `migrate deploy` (non-interactive, applies any pending migrations — **not** `migrate dev`) against the production database, (3) builds the Next.js app. This means **schema migrations run automatically as part of every deploy** — there is no separate manual migration step for ordinary changes, as long as the matching `prisma/postgres/migrations/` entry was committed per the workflow above.
+Every Vercel build therefore, in order: (1) generates a fresh Prisma Client, (2) runs `migrate deploy` (non-interactive, applies any pending migrations — **not** `migrate dev`) against the production database, (3) builds the Next.js app. This means **schema migrations run automatically as part of every deploy** — there is no separate manual migration step for ordinary changes, as long as the migration was committed (it's often already applied by the time of deploy, since local dev runs against the same database — in that case `migrate deploy` is a documented no-op).
 
 ```mermaid
 flowchart LR
     A[git push / vercel --prod] --> B[Vercel build starts]
-    B --> C[prisma generate<br/>--schema postgres/schema.prisma]
-    C --> D[prisma migrate deploy<br/>--schema postgres/schema.prisma]
+    B --> C[prisma generate<br/>--schema prisma/schema.prisma]
+    C --> D[prisma migrate deploy<br/>--schema prisma/schema.prisma]
     D --> E[next build]
     E --> F[Deploy to Vercel Functions]
     F --> G[Alias to crm-fx2.vercel.app]
@@ -68,7 +54,7 @@ Production Postgres is **Neon**, provisioned through the Vercel Marketplace inte
 
 | Variable | Required | Set where | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | Always | Local `.env` (SQLite path) / Vercel project settings (Neon Postgres URL, injected by the integration) | Prisma datasource connection string |
+| `DATABASE_URL` | Always | `.env.local` locally (via `vercel env pull`) / Vercel project settings in production — same Neon Postgres URL either way | Prisma datasource connection string |
 | `ENCRYPTION_KEY` | Only if using Google Drive | `.env` / Vercel | Encrypts stored Drive OAuth tokens (any long random string, e.g. `openssl rand -hex 32`) |
 | `GOOGLE_CLIENT_ID` | Only if using Google Drive | `.env` / Vercel | OAuth client ID from Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | Only if using Google Drive | `.env` / Vercel | OAuth client secret |

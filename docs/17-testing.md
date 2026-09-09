@@ -5,13 +5,14 @@
 **Vitest** (`^5.0.0`), configured in `vitest.config.ts`:
 - `@` path alias resolved to `src/`.
 - `server-only` package aliased to a no-op stub (`src/lib/testing/server-only-stub.ts`) so server-only modules can be imported directly in tests running under Node rather than the Next.js server runtime.
-- `fileParallelism: false` — test files run sequentially, not in parallel workers, because they share one SQLite database file.
+- `fileParallelism: false` — test files run sequentially, not in parallel workers, because the database-backed ones share one database.
 
-**`vitest.setup.ts`** runs once before the suite: deletes any existing `prisma/test.db`, points `DATABASE_URL` at a fresh file, and runs `npx prisma migrate deploy` against it — every test run starts from a clean, fully-migrated, empty database, **never** the local dev database (`dev.db`), which may hold real imported data.
+There is no local/disposable database. **`vitest.setup.ts`** runs once before the suite: if `TEST_DATABASE_URL` is set (pointing at a disposable Postgres database — e.g. a separate Neon branch, **never** production), it points `DATABASE_URL` at it and runs `npx prisma migrate deploy` against it, then sets `VITEST_DB_AVAILABLE=1`. `auth.test.ts` and `queue.test.ts` — the two files that call `deleteMany()` on Users/Sessions/Records to reset state between cases — check that flag and skip themselves entirely (via `describe.skipIf`) when it's unset, printing a warning instead of running. Every other test file is pure logic with no database access and always runs.
 
 Run with:
 ```bash
-npm test          # vitest run — full suite, single pass
+npm test                                          # vitest run — DB-backed tests skip without a test database
+TEST_DATABASE_URL="<postgres-url>" npm test        # full suite, including DB-backed tests
 npx tsc --noEmit   # typecheck (run alongside tests, not part of `npm test`)
 npm run lint       # ESLint
 npm run build      # production build (also a correctness check)

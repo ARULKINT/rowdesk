@@ -6,14 +6,8 @@
 crm-fx2/
 ├── docs/                        # This documentation package
 ├── prisma/
-│   ├── schema.prisma            # Source of truth — SQLite (local dev/test)
-│   ├── postgres/
-│   │   ├── schema.prisma        # Generated mirror — PostgreSQL (production)
-│   │   └── migrations/          # Postgres-specific migration history
-│   ├── migrations/              # SQLite migration history
-│   └── seed.ts                  # Dev-only seed script
-├── scripts/
-│   └── sync-postgres-schema.mjs # Regenerates prisma/postgres/schema.prisma
+│   ├── schema.prisma            # Canonical model definitions — PostgreSQL, the only database
+│   └── migrations/              # The one migration history (local dev, tests, and production)
 ├── src/
 │   ├── app/                     # Next.js App Router — pages + API routes
 │   ├── components/              # Shared React components
@@ -21,7 +15,7 @@ crm-fx2/
 ├── public/                      # Static assets (unused SVG placeholders from create-next-app)
 ├── vercel.json                  # Custom production build command
 ├── prisma.config.ts             # Prisma CLI configuration (replaces package.json#prisma)
-├── vitest.config.ts / vitest.setup.ts   # Test runner config + isolated test DB bootstrap
+├── vitest.config.ts / vitest.setup.ts   # Test runner config; DB-backed tests need TEST_DATABASE_URL
 ├── .env.example                 # Documented environment variable shape
 └── README.md                    # Developer-facing quick reference
 ```
@@ -113,11 +107,8 @@ Every file here (except `schemas.ts`, `validate.ts`, `csv.ts`, `templates.ts`, `
 
 | Path | Purpose |
 |---|---|
-| `schema.prisma` | Canonical model definitions, SQLite datasource — **edit this one** |
-| `migrations/` | SQLite migration history (applied locally and in tests) |
-| `postgres/schema.prisma` | Mechanically generated from `schema.prisma` with only the `datasource` block swapped to PostgreSQL — **never hand-edit** |
-| `postgres/migrations/` | PostgreSQL migration history (applied in the Vercel build) |
-| `seed.ts` | Creates a dev admin (`admin` / `ChangeMe123!`), a dev processor, a default template dictionary, and sample records — **local dev only** |
+| `schema.prisma` | Canonical model definitions, PostgreSQL datasource — the only schema, the only database |
+| `migrations/` | The one migration history — applied locally, in tests (when `TEST_DATABASE_URL` is set), and in the Vercel build |
 
 ## 6. Files Deliberately Not Documented Further
 

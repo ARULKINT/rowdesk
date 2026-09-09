@@ -5,7 +5,7 @@ An internal tool for cleaning and enriching scraped business-listing data (Googl
 ## Architecture
 
 - **Next.js 16 (App Router) + TypeScript**, Route Handlers for the API, Server Components for data-loading pages.
-- **Prisma ORM** over **SQLite** in local dev, **PostgreSQL** in production — the only change between the two is `prisma/schema.prisma`'s `datasource.provider` and `DATABASE_URL` (see [Database](#database)).
+- **Prisma ORM over PostgreSQL** — there is no local database. Local dev, tests, and production all point at Postgres (see [Database](#database)); local dev normally points at the same production database via `.env.local`.
 - **Session auth**: bcrypt-hashed passwords, an httpOnly session cookie backed by a `Session` table (no third-party auth provider). Every route is authorized server-side — `requireUser()` / `requireAdmin()` in Server Components, a `getApiUser()` check at the top of every mutating Route Handler.
 - **Locked shared queue**: visiting `/dashboard` atomically claims the next available record via a compare-and-swap `updateMany` with a retry loop (`src/lib/queue.ts`) — portable to Postgres without raw `SELECT FOR UPDATE`. Stale claims self-heal on the next claim attempt (configurable timeout in Admin → Settings).
 - **Google Drive ingestion**: OAuth2 (read-only `drive.readonly` scope) via `googleapis`, tokens encrypted at rest (AES-256-GCM). Scanning a configured folder classifies each CSV as New/Updated/Unchanged by comparing Drive's `modifiedTime` to the last version we successfully processed; each processed file becomes a **new** `SourceFile` version rather than overwriting the old one, so already-claimed/completed records are never touched.
@@ -15,19 +15,15 @@ An internal tool for cleaning and enriching scraped business-listing data (Googl
 
 ```bash
 npm install
-cp .env.example .env      # fill in DATABASE_URL at minimum
-npx prisma migrate dev    # creates dev.db and applies migrations
-npm run db:seed           # creates a dev admin + processor account, default templates
+vercel env pull .env.local   # pulls the real DATABASE_URL (and other secrets) from Vercel
+cp .env.example .env          # fill in ENCRYPTION_KEY / GOOGLE_* if you need Google Drive locally
+npx prisma generate
 npm run dev
 ```
 
-Open http://localhost:3000 — you'll land on `/login`.
+Open http://localhost:3000 — you'll land on `/login`. There is no separate seed/setup step for the database itself — you're pointed at the real (production) database, so log in with a real account.
 
-**Seeded dev credentials** (see `prisma/seed.ts`) — change or remove before anything but local dev:
-- Admin: `admin` / `ChangeMe123!`
-- Data Processor: `processor1` / `ChangeMe123!`
-
-**Note on schema changes**: if you edit `prisma/schema.prisma` while `npm run dev` is already running, restart it after `prisma migrate dev`. Node doesn't hot-reload native `node_modules` packages like the generated Prisma Client, so a long-running dev server keeps the old client in memory even after `prisma generate` writes a new one to disk — you'll see `Cannot read properties of undefined` errors on any new model until you restart.
+**Note on schema changes**: if you edit `prisma/schema.prisma` while `npm run dev` is already running, restart it after `prisma migrate dev`/`migrate deploy`. Node doesn't hot-reload native `node_modules` packages like the generated Prisma Client, so a long-running dev server keeps the old client in memory even after `prisma generate` writes a new one to disk — you'll see `Cannot read properties of undefined` errors on any new model until you restart.
 
 ## Environment variables
 
@@ -35,7 +31,7 @@ See `.env.example` for the full annotated list. Summary:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | Yes | SQLite file path in dev, Postgres connection string in production |
+| `DATABASE_URL` | Yes | Postgres connection string. Written into `.env.local` by `vercel env pull`; takes precedence over `.env` |
 | `ENCRYPTION_KEY` | Only if connecting Google Drive | Encrypts stored OAuth tokens at rest (any long random string, e.g. `openssl rand -hex 32`) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Only if connecting Google Drive | OAuth client from Google Cloud Console — see `.env.example` for setup steps |
 
@@ -43,26 +39,17 @@ Never commit `.env`. `.env.example` documents the shape without secrets.
 
 ## Database
 
-Two parallel Prisma schemas, kept in sync mechanically instead of by hand:
-
-- `prisma/schema.prisma` + `prisma/migrations/` — **SQLite**, used for local dev and the test suite. Edit this one.
-- `prisma/postgres/schema.prisma` + `prisma/postgres/migrations/` — **PostgreSQL**, used only for the Vercel/production build. This file is generated — never hand-edit it.
-
-Why two files instead of one "flip a line" schema: Prisma's `datasource.provider` is a static string, and migration `.sql` files are provider-specific (SQLite and Postgres SQL aren't interchangeable), so there's no way to share one migration history across both. Splitting them keeps local dev exactly on SQLite (no Docker/Postgres required to hack on this repo) while production runs real Postgres.
+One schema, one migration history, one database — `prisma/schema.prisma` + `prisma/migrations/`, PostgreSQL, used for local dev, and production alike. There is no local/SQLite database and no separate "dev" copy of the schema to keep in sync — `DATABASE_URL` (from `.env.local`, pulled via `vercel env pull`) points local dev at the same Neon Postgres database production uses.
 
 After changing models in `prisma/schema.prisma`:
 
 ```bash
-npx prisma migrate dev --name <change>              # as usual, against SQLite
-npm run db:sync-postgres-schema                      # regenerates prisma/postgres/schema.prisma
-DATABASE_URL="<postgres-url>" npx prisma migrate dev --schema prisma/postgres/schema.prisma --name <change>
+npx prisma migrate dev --name <change>
 ```
 
-That last command needs a real reachable Postgres URL (a Neon branch, local Postgres, whatever you use for this) since `migrate dev` computes and applies the diff interactively. In this project that's a Neon Postgres database, provisioned via the Vercel marketplace integration (`vercel integration add neon`) — it creates separate branches per Vercel environment (production/preview/development) automatically.
+This computes and applies the migration against whatever `DATABASE_URL` currently resolves to — normally the real database, since there's nothing else to point it at. Review the generated `.sql` before running this against data you care about; for anything destructive, prefer writing the migration by hand or testing the diff first with `prisma migrate diff`.
 
-Production migrations run automatically as part of the Vercel build (see `vercel.json`'s `buildCommand`): `prisma generate` and `prisma migrate deploy` (not `migrate dev` — that's interactive/dev-only) both target `prisma/postgres/schema.prisma`, then `next build` runs.
-
-Seeding: `npm run db:seed` works against whichever schema's client was last generated — run it locally against SQLite as usual; for production, more realistically create your real admin user directly (see [Admin usage](#admin-usage)) rather than seeding the sample dev data.
+Production migrations also run automatically as part of the Vercel build (see `vercel.json`'s `buildCommand`): `prisma generate` and `prisma migrate deploy` (not `migrate dev` — that's interactive/dev-only) both run against `prisma/schema.prisma`, then `next build` runs. So a migration created and committed locally gets applied again (as a no-op, since it's already applied) on the next deploy — that's expected, not a bug.
 
 Backups: this app doesn't implement its own backup mechanism — use your Postgres host's automated backups/point-in-time recovery (Neon, and most others, offer this).
 
@@ -101,17 +88,23 @@ npm run lint
 npm run build
 ```
 
-Tests run against an isolated SQLite file (`prisma/test.db`, migrated fresh by `vitest.setup.ts`), never the dev database. Coverage: CSV column detection/cleaning rules, queue claim/skip/done/ownership/stale-release/concurrency (two users claiming simultaneously never get the same record), Google Drive New/Updated/Unchanged classification and folder-ID parsing, and the token encryption round-trip.
+There is no local/disposable database, so the database-backed tests (`auth.test.ts`, `queue.test.ts` — password hashing, session resolution, queue claim/skip/done/ownership/stale-release/concurrency) only run when `TEST_DATABASE_URL` is set, pointing at a disposable Postgres database (e.g. a separate Neon branch — never production, since these tests freely delete rows):
+
+```bash
+TEST_DATABASE_URL="<postgres-url>" npm test
+```
+
+Without it, those two files skip themselves (`vitest.setup.ts` prints a warning) and the rest of the suite still runs — CSV column detection/cleaning rules, Google Drive New/Updated/Unchanged classification and folder-ID parsing, and the token encryption round-trip.
 
 ## Deployment (Vercel)
 
-This repo is already set up for it — `vercel.json`'s `buildCommand` runs `prisma generate` + `prisma migrate deploy` against `prisma/postgres/schema.prisma` before `next build`, so a normal Vercel deploy (git push, or `vercel --prod`) handles migrations automatically. To set this up from scratch elsewhere:
+This repo is already set up for it — `vercel.json`'s `buildCommand` runs `prisma generate` + `prisma migrate deploy` against `prisma/schema.prisma` before `next build`, so a normal Vercel deploy (git push, or `vercel --prod`) handles migrations automatically. To set this up from scratch elsewhere:
 
 1. Push to a Git repo, import it into Vercel (`vercel link` locally, or via the dashboard).
 2. Provision Postgres and connect it to the project — `vercel integration add neon --plan free_v3` (or Supabase, or point `DATABASE_URL` at any existing Postgres instance) sets `DATABASE_URL` for you across environments; Neon specifically gives each Vercel environment (production/preview/development) its own branch.
-3. Generate the initial Postgres migration once against a real reachable Postgres URL — see [Database](#database) — and commit `prisma/postgres/migrations/`.
+3. Generate the initial migration once against a real reachable Postgres URL — see [Database](#database) — and commit `prisma/migrations/`.
 4. Set any remaining env vars from the table above (`ENCRYPTION_KEY`, `GOOGLE_*`) in the Vercel project settings if you're using Google Drive.
-5. Deploy. `vercel.json` handles running migrations as part of the build from here on — no separate migration step needed for future schema changes, as long as you commit the new `prisma/postgres/migrations/` entry (step 3's pattern) alongside the SQLite one.
+5. Deploy. `vercel.json` handles running migrations as part of the build from here on — no separate migration step needed for future schema changes, as long as you commit the new `prisma/migrations/` entry (step 3's pattern).
 
 If using Google Drive: update `GOOGLE_REDIRECT_URI` to the production URL and add the same redirect URI in Google Cloud Console.
 

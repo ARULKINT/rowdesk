@@ -9,7 +9,7 @@
 | Git | To clone the repository |
 | A terminal that can run `npx` | For Prisma CLI commands |
 
-No Docker, no local Postgres, and no Google Cloud account are required to get the app running locally — SQLite is used by default and Google Drive is optional.
+No Docker or local Postgres install is needed — local dev connects straight to the real (production) Neon Postgres database via `.env.local`. No Google Cloud account is required either — Google Drive is optional.
 
 ## 2. Repository Setup
 
@@ -22,30 +22,21 @@ npm install
 ## 3. Environment Configuration
 
 ```bash
+vercel env pull .env.local   # pulls the real DATABASE_URL and other secrets from Vercel
 cp .env.example .env
 ```
 
-At minimum, `DATABASE_URL="file:./dev.db"` (already the default in `.env.example`) is enough to run the app with no Google Drive integration. Leave `ENCRYPTION_KEY` and the `GOOGLE_*` variables blank to skip Drive setup entirely — the Admin → Google Drive page will simply show "not configured."
+`.env.local` (from `vercel env pull`) takes precedence over `.env` and provides `DATABASE_URL` — there is nothing to fill in for the database itself. In `.env`, leave `ENCRYPTION_KEY` and the `GOOGLE_*` variables blank to skip Drive setup entirely — the Admin → Google Drive page will simply show "not configured."
 
 To enable Google Drive locally, follow the inline instructions in `.env.example` (create a Google Cloud project, enable the Drive API, configure the OAuth consent screen with the `drive.readonly` scope, create a Web-application OAuth client, register `http://localhost:3000/api/admin/drive/callback` as a redirect URI) and fill in all four `GOOGLE_*` variables plus `ENCRYPTION_KEY` (any long random string, e.g. `openssl rand -hex 32`).
 
-## 4. Database Setup
+## 4. Database
 
 ```bash
-npx prisma migrate dev    # creates dev.db and applies every migration in prisma/migrations/
-npm run db:seed           # tsx prisma/seed.ts — see below
+npx prisma generate
 ```
 
-`npm run db:seed` is idempotent-ish (checks `count === 0` before creating) and produces:
-
-| What | Detail |
-|---|---|
-| Admin user | username `admin`, password `ChangeMe123!` |
-| Data Processor user | username `processor1`, password `ChangeMe123!` |
-| Default template dictionary | Named "Default", active, seeded with the 3 built-in starter templates |
-| Sample source file | `sample-leads.csv` with 5 realistic sample records |
-
-**Change or remove these seeded credentials before using the app for anything beyond local development.**
+There is no seed step and no local database to set up — you're pointed at the real database, with real data and real accounts already in it. Log in with a real account (ask an existing admin to create one for you from Admin → Users if you don't have one).
 
 ## 5. Running Locally
 
@@ -53,7 +44,7 @@ npm run db:seed           # tsx prisma/seed.ts — see below
 npm run dev
 ```
 
-Open `http://localhost:3000` — you land on `/login`. Sign in with the seeded admin or processor credentials above.
+Open `http://localhost:3000` — you land on `/login`.
 
 ### Important gotcha: stale Prisma Client after a schema change
 
@@ -62,17 +53,18 @@ If `prisma/schema.prisma` is edited while `npm run dev` is already running, **re
 ## 6. Testing
 
 ```bash
-npm test          # vitest run
+npm test                                    # vitest run — database-backed tests skip themselves
+TEST_DATABASE_URL="<postgres-url>" npm test  # full suite, against a disposable Postgres database
 npx tsc --noEmit  # typecheck
 npm run lint      # ESLint
 ```
 
-Tests run against an isolated, auto-migrated SQLite file (`prisma/test.db`) — never against `dev.db`. See [17-testing.md](17-testing.md).
+There is no local/disposable database, so `auth.test.ts` and `queue.test.ts` (the tests that reset state by deleting rows) only run when `TEST_DATABASE_URL` points at a database you're fine with being wiped repeatedly — never production. See [17-testing.md](17-testing.md).
 
 ## 7. Building
 
 ```bash
-npm run build     # next build (local build — does NOT run the Postgres-specific migrate step;
+npm run build     # next build (local build — does NOT run the migrate step;
                    # that only happens in the Vercel build command, see 18-deployment.md)
 npm run start      # serves the production build locally
 ```
@@ -82,7 +74,7 @@ npm run start      # serves the production build locally
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Cannot read properties of undefined` on a Prisma model | Stale client after a schema edit | Restart `npm run dev` |
-| `Error validating datasource db: the URL must start with the protocol file:` | `DATABASE_URL` in the current shell/process environment is set to a Postgres URL, overriding `.env` (dotenv does not override existing `process.env` values by default) | Unset the stray shell env var, or restart the dev server from a clean shell |
+| `Error validating datasource db: the URL must start with the protocol postgresql://` | `DATABASE_URL` isn't resolving to a Postgres connection string — usually `.env.local` is missing or a stray shell env var is overriding it | Run `vercel env pull .env.local`; check for a stray `$env:DATABASE_URL`/`DATABASE_URL` set in your shell |
 | Google Drive shows "not configured" | One or more `GOOGLE_*` env vars unset | Fill in `.env`, restart the dev server |
 | `EPERM`/rename error running `prisma generate` | A running dev server holds a lock on the query-engine DLL | Stop the dev server (or delete `node_modules/.prisma/client` and regenerate) before switching schemas |
 
