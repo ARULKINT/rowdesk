@@ -1,8 +1,23 @@
 import { prisma } from "@/lib/prisma";
 import { dailyCounts } from "@/lib/stats";
 import { nowMs } from "@/lib/time";
+import { OUTREACH_STAGES, type OutreachStage } from "@/lib/queue";
 import StatCard from "@/components/StatCard";
 import SimpleBarChart from "@/components/SimpleBarChart";
+
+const STAGE_LABEL: Record<OutreachStage, string> = {
+  initial: "Initial",
+  followup1: "Follow-up 1",
+  followup2: "Follow-up 2",
+};
+
+// Stages a record has moved past once it's this far along — e.g. a record
+// at followup2 has completed both initial and followup1.
+const STAGES_PAST: Record<OutreachStage, string[]> = {
+  initial: ["followup1", "followup2", "finished"],
+  followup1: ["followup2", "finished"],
+  followup2: ["finished"],
+};
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +96,32 @@ export default async function AdminStatisticsPage({
     ]);
 
   const removed = (fileAgg._sum.removedMissingName ?? 0) + (fileAgg._sum.removedMissingPhone ?? 0);
+
+  const now = new Date();
+  const [stageCounts, fullyDone] = await Promise.all([
+    Promise.all(
+      OUTREACH_STAGES.map(async (stage) => {
+        const [pendingNow, inProcess, completedPast] = await Promise.all([
+          prisma.record.count({
+            where: {
+              ...recordScope,
+              outreachStage: stage,
+              status: { in: ["pending", "skipped"] },
+              OR: [{ stageDueAt: null }, { stageDueAt: { lte: now } }],
+            },
+          }),
+          prisma.record.count({
+            where: { ...recordScope, outreachStage: stage, stageDueAt: { gt: now } },
+          }),
+          prisma.record.count({
+            where: { ...recordScope, outreachStage: { in: STAGES_PAST[stage] } },
+          }),
+        ]);
+        return { stage, pendingNow, inProcess, completedPast };
+      })
+    ),
+    prisma.record.count({ where: { ...recordScope, outreachStage: "finished" } }),
+  ]);
 
   const doneInRange = await prisma.record.findMany({
     where: {
@@ -169,6 +210,52 @@ export default async function AdminStatisticsPage({
         <StatCard label="Removed" value={removed} />
         <StatCard label="In Progress" value={inProgress} />
         <StatCard label="Skipped" value={skipped} />
+      </div>
+
+      <h2 className="mb-2 text-[0.85rem] font-bold" style={{ color: "var(--ink)" }}>
+        Outreach stage breakdown
+      </h2>
+      <div
+        className="mb-6 overflow-x-auto rounded-[10px] border-2"
+        style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+      >
+        <table className="w-full min-w-[560px] text-left text-[0.82rem]">
+          <thead>
+            <tr
+              style={{
+                color: "var(--ink-muted)",
+                fontSize: "0.68rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              <th className="px-3 py-2.5 font-semibold">Stage</th>
+              <th className="py-2.5 font-semibold">Pending (ready now)</th>
+              <th className="py-2.5 font-semibold">In Process (3-day wait)</th>
+              <th className="py-2.5 font-semibold">Completed (moved past)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stageCounts.map(({ stage, pendingNow, inProcess, completedPast }) => (
+              <tr key={stage} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                <td className="px-3 py-2.5 font-medium">{STAGE_LABEL[stage]}</td>
+                <td className="py-2.5" style={{ fontFamily: "var(--font-data-stack)" }}>
+                  {pendingNow}
+                </td>
+                <td className="py-2.5" style={{ fontFamily: "var(--font-data-stack)" }}>
+                  {inProcess}
+                </td>
+                <td className="py-2.5" style={{ fontFamily: "var(--font-data-stack)" }}>
+                  {completedPast}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatCard label="Fully Done (all 3 stages)" value={fullyDone} accent />
       </div>
 
       <div
