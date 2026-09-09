@@ -455,7 +455,7 @@
 /* ---- action bar ---- */
 .actions {
   display: grid;
-  grid-template-columns: 0.85fr 0.85fr 1.3fr 1.3fr 0.85fr;
+  grid-template-columns: 0.85fr 1.6fr 0.85fr;
   gap: 10px;
   margin-top: 18px;
 }
@@ -476,15 +476,6 @@
   letter-spacing: 0.01em;
 }
 
-.btnSkip {
-  border: 2px solid var(--border);
-  background: var(--surface);
-  color: var(--ink);
-}
-.btnSkip:hover {
-  background: var(--chip);
-}
-
 .btnDone {
   border: 2px solid var(--border);
   background: var(--accent);
@@ -495,7 +486,6 @@
 }
 
 .btnDone:disabled,
-.btnSkip:disabled,
 .btnNext:disabled {
   opacity: 0.5;
   cursor: not-allowed;

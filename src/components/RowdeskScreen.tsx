@@ -48,7 +48,7 @@ async function patchRecord(id: string, body: Record<string, unknown>) {
   return res.json();
 }
 
-async function queueAction(recordId: string, action: "skip" | "done" | "next" | "advance") {
+async function queueAction(recordId: string, action: "next" | "advance") {
   const res = await fetch("/api/queue/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -205,7 +205,7 @@ export default function RowdeskScreen({
     setBox((b) => ({ ...b, copied: true }));
   }
 
-  async function runAction(action: "skip" | "done" | "next" | "advance") {
+  async function runAction(action: "next" | "advance") {
     if (!record || busy) return;
     if (action === "advance" && !doneReady) return;
     setBusy(true);
@@ -215,7 +215,7 @@ export default function RowdeskScreen({
     try {
       const next = await queueAction(record.id, action);
 
-      if (action === "done" || (action === "advance" && wasFinalStage)) {
+      if (action === "advance" && wasFinalStage) {
         setDoneToday((d) => d + 1);
         const stamp = new Date().toLocaleTimeString([], {
           hour: "2-digit",
@@ -225,12 +225,6 @@ export default function RowdeskScreen({
         showToast(
           <>
             Done — <b>{name}</b> · you · {stamp}
-          </>
-        );
-      } else if (action === "skip") {
-        showToast(
-          <>
-            Skipped — <b>{name}</b>
           </>
         );
       } else if (action === "advance") {
@@ -474,14 +468,6 @@ export default function RowdeskScreen({
           </button>
           <button
             type="button"
-            className={styles.btnSkip}
-            onClick={() => runAction("skip")}
-            disabled={busy}
-          >
-            Skip
-          </button>
-          <button
-            type="button"
             className={styles.btnDone}
             onClick={() => runAction("advance")}
             disabled={busy || !doneReady}
@@ -494,15 +480,6 @@ export default function RowdeskScreen({
             }
           >
             {stage === "followup2" ? "Done — Complete" : "Done and Next Name"}
-          </button>
-          <button
-            type="button"
-            className={styles.btnSkip}
-            onClick={() => runAction("done")}
-            disabled={busy}
-            title="Marks this record fully done now and cancels any remaining follow-ups"
-          >
-            Mark Converted
           </button>
           <button
             type="button"
