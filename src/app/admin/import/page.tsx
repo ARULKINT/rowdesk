@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import CleaningSummary from "@/components/CleaningSummary";
 
-interface ImportResult {
+interface ImportSummary {
   sourceFileId: string;
   filename: string;
   totalRows: number;
@@ -16,41 +16,59 @@ interface ImportResult {
   missingWebsite: number;
 }
 
+interface FileResult {
+  filename: string;
+  ok: boolean;
+  error?: string;
+  summary?: ImportSummary;
+}
+
+interface ImportResponse {
+  processed: number;
+  failed: number;
+  results: FileResult[];
+}
+
 export default function AdminImportPage() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileNames, setFileNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
+  const [response, setResponse] = useState<ImportResponse | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const file = inputRef.current?.files?.[0];
-    if (!file) {
-      setError("Choose a CSV file first.");
+    const files = inputRef.current?.files;
+    if (!files || files.length === 0) {
+      setError("Choose at least one CSV file first.");
       return;
     }
 
     setBusy(true);
     setError(null);
-    setResult(null);
+    setResponse(null);
 
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      for (const file of Array.from(files)) formData.append("file", file);
+
       const res = await fetch("/api/import", { method: "POST", body: formData });
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? "Something went wrong importing this file.");
+        setError(data.error ?? "Something went wrong importing these files.");
         return;
       }
 
-      setResult(data);
-      setTimeout(() => router.push("/admin/queue"), 2400);
+      setResponse(data as ImportResponse);
+      // Only auto-jump to the queue when every file succeeded — if something
+      // failed, keep the results on screen so the errors are actually seen.
+      if (data.failed === 0) {
+        setTimeout(() => router.push("/admin/queue"), 2400);
+      }
     } catch {
-      setError("Something went wrong importing this file.");
+      setError("Something went wrong importing these files.");
     } finally {
       setBusy(false);
     }
@@ -75,12 +93,13 @@ export default function AdminImportPage() {
           className="mb-1.5 block text-[0.7rem] font-semibold uppercase tracking-[0.06em]"
           style={{ color: "var(--ink-muted)" }}
         >
-          CSV file
+          CSV file(s)
         </label>
         <p className="mb-3 text-[0.8rem]" style={{ color: "var(--ink-muted)" }}>
           Expected columns: name, phone, rating, maps_url, website_url — differently-named
           columns are detected automatically. Name and Phone are required on each row; rows
-          missing either are removed. Rating, Maps URL and Website may be blank.
+          missing either (or with an unusable phone number) are removed. Rating, Maps URL and
+          Website may be blank. Select multiple files to import them all in one go.
         </p>
 
         <input
@@ -88,7 +107,8 @@ export default function AdminImportPage() {
           id="csvFile"
           type="file"
           accept=".csv,text/csv"
-          onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+          multiple
+          onChange={(e) => setFileNames(Array.from(e.target.files ?? []).map((f) => f.name))}
           className="mb-4 block w-full rounded-[8px] border-2 p-2.5 text-[0.9rem]"
           style={{ borderColor: "var(--border)", background: "var(--surface)" }}
         />
@@ -103,12 +123,16 @@ export default function AdminImportPage() {
             color: "var(--accent-contrast)",
           }}
         >
-          {busy ? "Importing…" : "Import"}
+          {busy
+            ? "Importing…"
+            : fileNames.length > 1
+            ? `Import ${fileNames.length} files`
+            : "Import"}
         </button>
 
-        {fileName && !result && (
+        {fileNames.length > 0 && !response && (
           <p className="mt-3 text-[0.78rem]" style={{ color: "var(--ink-muted)" }}>
-            Selected: {fileName}
+            Selected: {fileNames.join(", ")}
           </p>
         )}
 
@@ -118,22 +142,41 @@ export default function AdminImportPage() {
           </p>
         )}
 
-        {result && (
-          <div className="mt-4">
-            <p className="mb-3 text-[0.85rem] font-medium" style={{ color: "var(--success)" }}>
-              Imported {result.imported} of {result.totalRows} rows. Opening the queue…
+        {response && (
+          <div className="mt-4 flex flex-col gap-4">
+            <p
+              className="text-[0.85rem] font-medium"
+              style={{ color: response.failed === 0 ? "var(--success)" : "var(--ink)" }}
+            >
+              {response.processed} of {response.processed + response.failed} file
+              {response.processed + response.failed === 1 ? "" : "s"} imported
+              {response.failed > 0 ? `, ${response.failed} failed` : ""}.
+              {response.failed === 0 ? " Opening the queue…" : ""}
             </p>
-            <CleaningSummary
-              data={{
-                totalRows: result.totalRows,
-                removedMissingName: result.removedMissingName,
-                removedMissingPhone: result.removedMissingPhone,
-                finalRows: result.imported,
-                missingRating: result.missingRating,
-                missingMapsUrl: result.missingMapsUrl,
-                missingWebsite: result.missingWebsite,
-              }}
-            />
+
+            {response.results.map((r, i) => (
+              <div key={`${r.filename}-${i}`}>
+                <p
+                  className="mb-2 text-[0.8rem] font-semibold"
+                  style={{ color: r.ok ? "var(--ink)" : "var(--accent)" }}
+                >
+                  {r.filename} — {r.ok ? "imported" : `failed: ${r.error}`}
+                </p>
+                {r.ok && r.summary && (
+                  <CleaningSummary
+                    data={{
+                      totalRows: r.summary.totalRows,
+                      removedMissingName: r.summary.removedMissingName,
+                      removedMissingPhone: r.summary.removedMissingPhone,
+                      finalRows: r.summary.imported,
+                      missingRating: r.summary.missingRating,
+                      missingMapsUrl: r.summary.missingMapsUrl,
+                      missingWebsite: r.summary.missingWebsite,
+                    }}
+                  />
+                )}
+              </div>
+            ))}
           </div>
         )}
       </form>
